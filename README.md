@@ -1,1 +1,2 @@
-# indhi-embedded-esp32-arduino
+# indhi Arduino lib for ESP32
+
