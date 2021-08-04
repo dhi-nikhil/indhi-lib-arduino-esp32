@@ -125,7 +125,7 @@ ErrorCode_t indhilib_sub_topic_set(char *feature_id, char *topic);
  * @param qos specify the qos
  * @return ErrorCode_t success or failed
  */
-ErrorCode_t indhilib_send_data(char *feature_id, double data, uint64_t timestamp);
+ErrorCode_t indhilib_send_data(char *feature_id, double data, uint32_t timestamp);
 /**
  * @brief to send feature specific data
  * 
@@ -134,11 +134,12 @@ ErrorCode_t indhilib_send_data(char *feature_id, double data, uint64_t timestamp
  * @param qos specify the qos
  * @return ErrorCode_t success or failed
  */
-ErrorCode_t indhilib_send_data(char *feature_id, int data, uint64_t timestamp);
-ErrorCode_t indhilib_send_data(char *feature_id, uint64_t data, uint64_t timestamp);
-ErrorCode_t indhilib_send_data(char *feature_id, char *data, uint64_t timestamp);
+ErrorCode_t indhilib_send_data(char *feature_id, int data, uint32_t timestamp);
+ErrorCode_t indhilib_send_data(char *feature_id, uint64_t data, uint32_t timestamp);
+ErrorCode_t indhilib_send_data(char *feature_id, char *data, uint32_t timestamp);
 ErrorCode_t indhilib_send_data(char *feature_id, double data);
 ErrorCode_t indhilib_send_data(char *feature_id, int data);
+ErrorCode_t indhilib_send_data(char *feature_id, uint32_t data);
 ErrorCode_t indhilib_send_data(char *feature_id, uint64_t data);
 ErrorCode_t indhilib_send_data(char *feature_id, char *data);
 ErrorCode_t indhilib_device_init_create_request(char **req, int length);
@@ -163,6 +164,8 @@ ErrorCode_t indhilib_add_level_bar(char *feature_id, char *feature_name, uint8_t
 ErrorCode_t indhilib_add_color_pallet(char *feature_id, char *feature_name, int version_code, feature_callback_t fc);
 ErrorCode_t indhilib_add_feature(char *feature_id, char *feature_name, int type, widget_code_t widget_code, widget_data_t widget_data, int version_code, feature_callback_t fc);
 ErrorCode_t indhilib_add_feature(char *feature_id, char *name, int type, int version_code, feature_callback_t fc);
+ErrorCode_t indhilib_add_feature(char *feature_id, char *feature_name, int version_code, feature_callback_t fc);
+ErrorCode_t indhilib_add_feature(char *feature_id, char *feature_name, int version_code);
 ErrorCode_t indhilib_deinit(void);
 ErrorCode_t check_configuration(void);
 ErrorCode_t check_configuration_code(void);
