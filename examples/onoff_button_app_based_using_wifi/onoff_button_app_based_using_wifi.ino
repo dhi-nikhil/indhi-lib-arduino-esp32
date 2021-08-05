@@ -50,7 +50,7 @@ void reset_button_task(void *arg)
     vTaskDelete(NULL);
 }
 
-extern "C" void app_main(void)
+void setup()
 {
     Serial.begin(115200);
     Serial.println("ESP32 idf Developer lib source code");
