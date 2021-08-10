@@ -12,23 +12,21 @@ feature_status_t level_callback(char *feature_id, int data)
 
 ErrorCode_t device_onboard(void)
 {
-    ErrorCode_t ErrorCode = ESP_OK;
     indhilib_init();
     indhilib_set_device_name(DEVICE_NAME);
     indhilib_set_onboarding_method(ONBOARDING_METHOD_APP_BASED);
     indhilib_add_level_bar(FEATURE_1_ID, FEATURE_1_NAME, 0, 100, 10, 1, level_callback);
-    ErrorCode = indhilib_provisioning();
-    return ErrorCode;
+    return indhilib_provisioning();
 }
 
 void reset_button_task(void *arg)
 {
     int count = 0;
-    gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
+    pinMode(0, INPUT);
     while (true)
     {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        int level = gpio_get_level(GPIO_NUM_0);
+        delay(1000);
+        int level = digitalRead(0);
         if (level == 0)
         {
             count++;
@@ -49,7 +47,7 @@ void reset_button_task(void *arg)
 void setup()
 {
     Serial.begin(115200);
-    Serial.println("ESP32 idf Developer lib source code");
+    Serial.println("ESP32 Arduino Developer lib source code");
     Serial.println("Light brigtness control example with indhi");
     xTaskCreate(reset_button_task, "reset_button_task", 4096, NULL, 5, NULL);
 
@@ -62,8 +60,13 @@ void setup()
     }
     else
     {
-        Serial.println("onboarding failed with error code : " + ErrorCode);
-        vTaskDelay(pdMS_TO_TICKS(10000));
+        Serial.print("onboarding failed with error code : ");
+        Serial.println(ErrorCode);
+        delay(10000);
         esp_restart();
     }
+}
+
+void loop()
+{
 }
