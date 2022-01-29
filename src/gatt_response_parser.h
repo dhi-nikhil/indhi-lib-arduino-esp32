@@ -1,9 +1,6 @@
 #ifndef GATT_RESPONSE_PARSER_H_
 #define GATT_RESPONSE_PARSER_H_
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "error_code_manager.h"
 #include "cJSON.h"
 
 ErrorCode_t gatt_data_parser(char *raw_data, cJSON **data_j);
