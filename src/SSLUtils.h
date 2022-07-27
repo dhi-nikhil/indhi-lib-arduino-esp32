@@ -13,18 +13,50 @@
 // {
 //     namespace SSL
 //     {
+/**
+ * @brief SSL utility class
+ *
+ */
 class SSLUtils
 {
 private:
-    char * mCertificate;
-    char * mKey;
+    char * mCertificate; /* certificate */
+    char * mKey; /* key */
 
 public:
+    /**
+     * @brief Construct a new SSLUtils object
+     *
+     */
     SSLUtils();
+    /**
+     * @brief Destroy the SSLUtils object
+     *
+     */
     ~SSLUtils();
+    /**
+     * @brief Set the Certificate object
+     *
+     * @param certificate certificate to store
+     */
     void SetCertificate(std::string certificate);
+    /**
+     * @brief Get the Certificate object
+     *
+     * @return char* get the certificate
+     */
     char * GetCertificate();
+    /**
+     * @brief Set the Key object
+     *
+     * @param key Set the key
+     */
     void SetKey(std::string key);
+    /**
+     * @brief Get the Key object
+     *
+     * @return char* Get the key
+     */
     char * GetKey();
 };
 //     }
