@@ -30,7 +30,7 @@ void setup() {
  Serial.setDebugOutput(true);
  
   DefaultEventLoop::DefaultEventLoopCreate();
-  device = new Device("devTest","wmxmIYNPThT9rt3Q1657625319891",_callback);
+  device = new Device("YOUR_DEVICE_NAME","TEMPLATE_ID",_callback);
 
   esp_err_t err = ESP_OK;
   
