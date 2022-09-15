@@ -10,6 +10,7 @@
 #include "MQTTClient.h"
 #include "DefaultEventLoop.h"
 #include "Task.h"
+#include "Message.h"
 
 /* This should be singleton */
 /* This should be derived from the WiFi and others */
@@ -122,6 +123,17 @@ public:
     }
     esp_err_t Send(char * slot, double data, int decimalPlaces);
     esp_err_t Send(char * slot, char * data);
+
+    std::string cJsonToSendStr(std::string key, char * data); 
+    std::string cJsonToSendDouble(std::string key, double data);
+    std::string cJsonToSendAck(std::string responseType, std::string data);
+    std::string DecryptPayload(std::string data);
+    std::string GetSlot(std::string data);
+    std::string GetValueStr(std::string data);
+    double GetValueDouble(std::string data);
+    std::string GetMessageId(std::string data);
+    Message::DataType GetDataType(std::string data);
+    Message::Command::CommandType GetCommandType(std::string data);
     /**
      * @brief Reset button task
      *
