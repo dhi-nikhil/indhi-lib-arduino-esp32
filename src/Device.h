@@ -134,6 +134,7 @@ public:
     std::string GetMessageId(std::string data);
     Message::DataType GetDataType(std::string data);
     Message::Command::CommandType GetCommandType(std::string data);
+    std::string GetURL(std::string data);
     /**
      * @brief Reset button task
      *

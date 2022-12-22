@@ -69,6 +69,7 @@ public:
         COMMAND_TYPE_NONE = 0, /* Command type none */
         COMMAND_TYPE_STATUS, /* command type status */
         COMMAND_TYPE_CONTROL, /* command type control */
+        COMMAND_TYPE_UPDATE, /* command type update */
         COMMAND_TYPE_DECONFIGURE,/* command type deconfigure */
         COMMAND_TYPE_DELETE,/* command type delete */
         COMMAND_TYPE_ACTIVATION,/* command type activation */

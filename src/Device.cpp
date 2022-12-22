@@ -11,6 +11,7 @@
 #include "driver/gpio.h"
 #include <cmath>
 #include "cJSON.h"
+#include "HttpsOTAUpdate.h"
 #include "PayloadEncryption.h"
 
 static const char *TAG = "Device";
@@ -53,6 +54,12 @@ void Device::DeviceEventHandler(void *handlerArguments, esp_event_base_t base, i
                     device->MQTTClient::Send(device->mDevicePubTopic, dataData, 0, false);
                 }
                 break;
+                case Command::CommandType::COMMAND_TYPE_UPDATE:
+                {
+                    ESP_LOGI(TAG, "Update firmware");
+                    std::string server_certificate = "";
+                    HttpsOTA.begin((char *)device->GetURL(decryptedData).c_str(), server_certificate.c_str(), false); 
+                }
                 default:
                 {
                     ESP_LOGE(TAG, "Invalid message for Device");
@@ -526,6 +533,10 @@ Message::Command::CommandType Device::GetCommandType(std::string data)
     {
         mCommandType = Command::CommandType::COMMAND_TYPE_ACTIVATION;
     }
+    else if (commandTypeString == "update")
+    {
+        mCommandType = Command::CommandType::COMMAND_TYPE_UPDATE;
+    }
     else if (commandTypeString == "control")
     {
         mCommandType = Command::CommandType::COMMAND_TYPE_CONTROL;
@@ -654,4 +665,29 @@ std::string Device::GetMessageId(std::string data)
 end:
     cJSON_Delete(eObj);
     return mMessageId;
+}
+
+std::string Device::GetURL(std::string data)
+{
+    cJSON *eObj, *_url;
+    std::string mURL;
+
+    eObj = cJSON_Parse(data.c_str());
+
+    if (eObj == NULL)
+    {
+        ESP_LOGE(TAG, "Error Parsing data");
+        goto end;
+    }
+
+    _url = cJSON_GetObjectItemCaseSensitive(eObj, "url");
+
+    if (_url)
+    {
+        mURL = std::string(cJSON_GetStringValue(_url));
+    }
+
+end:
+    cJSON_Delete(eObj);
+    return mURL;
 }
