@@ -6,11 +6,11 @@
 #include "WiFi.h"
 #include "EventLoop.h"
 #include "HTTPServer.h"
-#include "Provision.h"
 #include "MQTTClient.h"
 #include "DefaultEventLoop.h"
 #include "Task.h"
 #include "Message.h"
+#include "DeviceConfig.h"
 
 /* This should be singleton */
 /* This should be derived from the WiFi and others */
@@ -22,6 +22,8 @@
  */
 typedef esp_err_t (*dataCallback_t)( char * slot, double data, char * str);
 
+typedef esp_err_t (*configCallback_t)( char * var, double value);
+
 /**
  * @brief Device class to build the device
  *
@@ -30,11 +32,14 @@ class Device : public NVStorage, public DefaultEventLoop, public MQTTClient
 {
 private:
     dataCallback_t mDataCallback; /* Data callback */
+    
+    configCallback_t mConfigCallback; /* config callback */
+
     /**
-     * @brief Used to store the name of device
+     * @brief Used to store the config
      *
      */
-    std::string mName;
+    std::vector<DeviceConfig *> mConfigs;
     /**
      * @brief Used to store the template Id
      *
@@ -107,22 +112,32 @@ public:
         DEVICE_SLOT_EVENT_DATA_RECEIVE,
         DEVICE_SLOT_EVENT_DATA_SEND
     };
+    
+
+    /**
+     * @brief Add config to the device object
+     *
+     * @param Config config
+     * @return DeviceMainApp* return the object if success otherwise nullptr
+     */
+    Device * AddConfig(DeviceConfig * config);
+
+    double GetConfig(char * variableName);
 
     /**
      * @brief Construct a new Device object with name of the device
      *
-     * @param name
+     * @param templateId
      */
-    Device(std::string name, std::string templateId, dataCallback_t mDataCallback);
+    Device(std::string templateId, dataCallback_t mDataCallback, configCallback_t mConfigCallback);
     void EraseData()
     {
-        NVStorage::Erase("SSID");
-        NVStorage::Erase("PSK");
-        NVStorage::Erase("APIKey");
-        NVStorage::Erase("InitEndp");
+        NVStorage::Erase();
     }
     esp_err_t Send(char * slot, double data, int decimalPlaces);
     esp_err_t Send(char * slot, char * data);
+
+    esp_err_t SaveConfig(char * var, double data);
 
     std::string cJsonToSendStr(std::string key, char * data); 
     std::string cJsonToSendDouble(std::string key, double data);
@@ -135,6 +150,7 @@ public:
     Message::DataType GetDataType(std::string data);
     Message::Command::CommandType GetCommandType(std::string data);
     std::string GetURL(std::string data);
+    std::string ConfigGetVar(std::string data);
     /**
      * @brief Reset button task
      *

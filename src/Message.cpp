@@ -659,7 +659,8 @@ Message * Message::FromStringWithKey(std::string data, std::string key)
         ESP_LOGI(TAG, "Message is Encrypted");
         // cJSON_GetObjectItemCaseSensitive()
         std::string decryptedData;
-        PayloadEncryption::DecryptCBC(&decryptedData, std::string(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mObj, "iv"))), 
+        PayloadEncryption::DecryptCBC(&decryptedData, 
+        std::string(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mObj, "iv"))), 
         std::string(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mObj, "eData"))));
         ESP_LOGI(TAG, "Decrypted data : %s", decryptedData.c_str());
 

@@ -133,6 +133,13 @@ public:
      * @return esp_err_t return if success or failed
      */
     esp_err_t Set(std::string key, uint32_t value);
+
+    
+esp_err_t putDouble(const char* key, const double value);
+double getDouble(const char* key, const double defaultValue);
+esp_err_t putBytes(const char* key, const void* value, size_t len);
+esp_err_t getBytes(const char* key, void * buf, size_t maxLen);
+size_t getBytesLength(const char* key);
 };
 //     }
 // }

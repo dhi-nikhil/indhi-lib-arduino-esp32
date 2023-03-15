@@ -19,11 +19,10 @@ static const char *TAG = "Device";
 void Device::DeviceEventHandler(void *handlerArguments, esp_event_base_t base, int32_t id, void *eventData)
 {
     Device *device = (Device *)handlerArguments;
-    ESP_LOGI(TAG, "Device ID : %s", device->mName.c_str());
     ESP_LOGI(TAG, "Event Base : %s, Event Id : %d", base, id);
     /* Send data from here to respective callbacks */
 
-    if (strcmp(base, device->mName.c_str()) == 0)
+    if (strcmp(base, device->mTemplateId.c_str()) == 0)
     {
         ESP_LOGW(TAG, "This is device event");
         switch (id)
@@ -60,6 +59,34 @@ void Device::DeviceEventHandler(void *handlerArguments, esp_event_base_t base, i
                     std::string server_certificate = "";
                     HttpsOTA.begin((char *)device->GetURL(decryptedData).c_str(), server_certificate.c_str(), false); 
                 }
+                break;
+                case Command::CommandType::COMMAND_TYPE_CONFIG:
+                {
+                    esp_err_t err;
+
+                    std::string var = device->ConfigGetVar(decryptedData);
+                    double value = device->GetValueDouble(decryptedData);
+
+                    device->mConfigCallback((char *)var.c_str(),value);
+
+                    err = device->SaveConfig((char *)var.c_str(), value);
+                    
+                    std::string resTypeString = "";
+
+                    if (err == ESP_OK)
+                    {
+                        resTypeString = "success";
+                    }
+                    else
+                    {
+                        resTypeString = "failed";
+                    }
+
+                    std::string dataData = device->cJsonToSendAck(resTypeString, decryptedData);
+
+                    device->MQTTClient::Send(device->mDevicePubTopic, dataData, 0, false);
+                }
+                break;
                 default:
                 {
                     ESP_LOGE(TAG, "Invalid message for Device");
@@ -209,7 +236,7 @@ void Device::MQTTEventHandlerDevice(void *handlerArgs, esp_event_base_t base, in
         mqttDataObject.data_len = mqttData->data_len;
         mqttDataObject.topic_len = mqttData->topic_len;
 
-        ESP_ERROR_CHECK_WITHOUT_ABORT(device->Post(device->mName.c_str(), DEVICE_EVENT_DATA_RECEIVE, &mqttDataObject, sizeof(mqttDataObject)));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(device->Post(device->mTemplateId.c_str(), DEVICE_EVENT_DATA_RECEIVE, &mqttDataObject, sizeof(mqttDataObject)));
     }
     break;
     case MQTT_EVENT_BEFORE_CONNECT: /*!< The event occurs before connecting */
@@ -227,14 +254,13 @@ void Device::MQTTEventHandlerDevice(void *handlerArgs, esp_event_base_t base, in
     }
 }
 
-Device::Device(std::string name, std::string templateId, dataCallback_t dataCallback) : NVStorage(), DefaultEventLoop(), MQTTClient()
+Device::Device(std::string templateId, dataCallback_t dataCallback, configCallback_t configCallback) : NVStorage(), DefaultEventLoop(), MQTTClient()
 {
-    mName = name;
     mTemplateId = templateId;
     mDataCallback = dataCallback;
-    ESP_LOGI(TAG, "Created Device with name %s", mName.c_str());
+    mConfigCallback = configCallback;
     NVStorage::Open("Provision");
-    ESP_ERROR_CHECK(Device::RegisterDefaultLoopHandler(mName.c_str(), ESP_EVENT_ANY_ID, DeviceEventHandler, this));
+    ESP_ERROR_CHECK(Device::RegisterDefaultLoopHandler(mTemplateId.c_str(), ESP_EVENT_ANY_ID, DeviceEventHandler, this));
     resetButtonTask = new Task();
     resetButtonTask->SetName("resetButtonTask")->SetStackSize(2048)->SetPriority(5)->SetTaskFunction(ResetButtonTask)->SetContext(this)->Start();
 }
@@ -279,7 +305,7 @@ esp_err_t Device::Send(char *slot, double data, int decimalPlaces)
     MQTTData mqttData;
     mqttData.data_len = messageString.length();
     strncpy(&mqttData.data[0], messageString.c_str(), messageString.length());
-    return Post(mName.c_str(), Device::DEVICE_SLOT_EVENT_DATA_SEND, &mqttData, sizeof(mqttData));
+    return Post(mTemplateId.c_str(), Device::DEVICE_SLOT_EVENT_DATA_SEND, &mqttData, sizeof(mqttData));
 }
 
 esp_err_t Device::Send(char *slot, char *data)
@@ -290,7 +316,7 @@ esp_err_t Device::Send(char *slot, char *data)
     MQTTData mqttData;
     mqttData.data_len = messageString.length();
     strncpy(&mqttData.data[0], messageString.c_str(), messageString.length());
-    return Post(mName.c_str(), Device::DEVICE_SLOT_EVENT_DATA_SEND, &mqttData, sizeof(mqttData));
+    return Post(mTemplateId.c_str(), Device::DEVICE_SLOT_EVENT_DATA_SEND, &mqttData, sizeof(mqttData));
 }
 
 std::string Device::cJsonToSendStr(std::string key, char *data)
@@ -690,4 +716,61 @@ std::string Device::GetURL(std::string data)
 end:
     cJSON_Delete(eObj);
     return mURL;
+}
+
+std::string Device::ConfigGetVar(std::string data)
+{
+    cJSON *eObj, *_var;
+    std::string mVar;
+
+    eObj = cJSON_Parse(data.c_str());
+
+    if (eObj == NULL)
+    {
+        ESP_LOGE(TAG, "Error Parsing data");
+        goto end;
+    }
+
+    _var = cJSON_GetObjectItemCaseSensitive(eObj, "namespace");
+
+    if (_var)
+    {
+        mVar = std::string(cJSON_GetStringValue(_var));
+    }
+
+end:
+    cJSON_Delete(eObj);
+    return mVar;
+}
+
+double Device::GetConfig(char * variableName){
+    
+    NVStorage::Open("Provision");
+
+    double val = NVStorage::getDouble(variableName, 0);
+
+    return val;
+}
+
+esp_err_t Device::SaveConfig(char * var, double value){
+    
+    NVStorage::Open("Provision");
+
+    esp_err_t err = NVStorage::putDouble(var, value);
+
+    if(err != ESP_OK){
+        ESP_LOGE(TAG, "add config data fail: %s -- %f", var,value);
+    }else{
+        ESP_LOGE(TAG, "add config data : %s -- %f", var,value);
+    }
+
+    return err;
+}
+
+Device *Device::AddConfig(DeviceConfig * config){
+
+    ESP_LOGE(TAG, "add config data : %s -- %f", config->mVar.c_str(),config->mValue);
+
+    mConfigs.push_back(config);
+    return this;
 }

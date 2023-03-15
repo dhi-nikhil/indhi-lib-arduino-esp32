@@ -126,5 +126,58 @@ esp_err_t NVStorage::Set(std::string key, uint32_t value)
     return ::nvs_set_u32(mHandle, key.c_str(), value);
 }
 
+esp_err_t NVStorage::putDouble(const char* key, const double value){
+    return putBytes(key, (void*)&value, sizeof(double));
+}
+
+double NVStorage::getDouble(const char* key, const double defaultValue) {
+    double value = defaultValue;
+    getBytes(key, (void*) &value, sizeof(double));
+    return value;
+}
+
+esp_err_t NVStorage::putBytes(const char* key, const void* value, size_t len){
+    esp_err_t esp_err;
+
+    esp_err = nvs_set_blob(mHandle, key, value, len);
+    if(esp_err){
+        return ESP_FAIL;
+    }
+
+    esp_err = nvs_commit(mHandle);
+
+    if(esp_err){
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+esp_err_t NVStorage::getBytes(const char* key, void * buf, size_t maxLen){
+    size_t len = getBytesLength(key);
+    if(!len || !buf || !maxLen){
+        return len;
+    }
+    if(len > maxLen){
+        return ESP_FAIL;
+    }
+    esp_err_t err = nvs_get_blob(mHandle, key, buf, &len);
+    if(err){
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+size_t NVStorage::getBytesLength(const char* key){
+    size_t len = 0;
+    if(!key){
+        return 0;
+    }
+    esp_err_t err = nvs_get_blob(mHandle, key, NULL, &len);
+    if(err){
+        return 0;
+    }
+    return len;
+}
+
 //     }
 // }

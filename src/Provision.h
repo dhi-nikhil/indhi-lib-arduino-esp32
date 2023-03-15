@@ -8,7 +8,6 @@
 #include "HTTPClient.h"
 #include "ProvisionEventLoop.h"
 #include "Ping.h"
-#include "BLEProvision.h"
 #include "Device.h"
 #include "MQTTClient.h"
 #include "sys/param.h"
@@ -37,15 +36,15 @@ enum
  * @brief Provisioning class
  *
  */
-class Provision :public WiFi, public ProvisionEventGroup, public HTTPServer, public HTTPClient, public Ping, public MQTTClient, public BLEProvision
+class Provision :public WiFi, public ProvisionEventGroup, public HTTPServer, public HTTPClient, public Ping, public MQTTClient
 {
 private:
     class Device * mDevice; /* store the reference to the object Device */
-    std::string mName; /* name of the provisioning */
     std::string mSSID; /* ssid of the ap */
     std::string mPSK; /* psk of the ap */
     std::string mValidationEndpoint; /* validation endpoint */
     std::string mInitializationEndpoint; /* Initialization endpoint */
+    std::string mTemplateVersion; /* template version */
     std::string mConfigKey; /* Config key */
     std::string mIPAddress; /* ip address */
     std::string mAPIKey; /* api key */
@@ -57,7 +56,6 @@ private:
     std::string mDataSubTopic; /* device data sub topic */
     std::string mDataPubTopic; /* device data pub topic */
     std::string mEncryptionKey; /* enccryption key */
-    bool mMQTTConnectionVerification; /* mqtt connection verification */
     bool mProvComplete = false; /* provisioning complete flag */
 
     /**
@@ -136,26 +134,11 @@ public:
      */
     esp_err_t Connect();
     /**
-     * @brief Start provisioning using BLE
-     *
-     * @return esp_err_t return if success or not
-     */
-    esp_err_t StartProvisioningBLE();
-    /**
      * @brief Start provisioning using WiFi
      *
      * @return esp_err_t return if success or not
      */
-    esp_err_t StartProvisioningWiFi();
-    /**
-     * @brief Start provisioning using token
-     *
-     * @param ssid ssid of the wifi
-     * @param psk psk of the wifi
-     * @param token token to connect with
-     * @return esp_err_t return if success or not
-     */
-    esp_err_t StartProvisioningWiFi(std::string ssid, std::string psk, std::string token);
+    esp_err_t StartProvisioningWiFi(std::string name);
     /**
      * @brief Erase all data
      *
@@ -184,7 +167,7 @@ public:
      * @param request store the results here
      * @return esp_err_t return if success or not
      */
-    esp_err_t CreateInitializationEndpointRequestCreate(std::string * request);
+    esp_err_t CreateInitializationEndpointRequestCreate(std::string * request, std::string templateVersion);
     /**
      * @brief Fetch the API key from response
      *
@@ -208,21 +191,6 @@ public:
      * @param eventData event data
      */
     static void MQTTEventHandlerProvision(void * handlerArgs, esp_event_base_t base, int32_t id, void * eventData);
-    /**
-     * @brief Static GAP event handler
-     *
-     * @param event event paramters
-     * @param param data paramters
-     */
-    static void GAPEventHandler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t * param);
-    /**
-     * @brief Static GAT event handler
-     *
-     * @param event event paramters
-     * @param gatts_if gatt if
-     * @param param data paramters
-     */
-    static void GATTEventHandler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t * param);
 };
 
 

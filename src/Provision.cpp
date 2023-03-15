@@ -14,16 +14,9 @@
 #include "System.h"
 #include "Utils.h"
 #include "Device.h"
+#include "DeviceConfig.h"
 #include "string"
 #include "Message.h"
-
-#include "esp_bt.h"
-
-#include "esp_gap_ble_api.h"
-#include "esp_gatts_api.h"
-#include "esp_bt_defs.h"
-#include "esp_bt_main.h"
-#include "esp_gatt_common_api.h"
 
 static const char * TAG = "Provision";
 
@@ -311,7 +304,7 @@ esp_err_t Provision::mInvalidHandler(httpd_req_t * request, httpd_err_code_t htt
     return ESP_OK;
 }
 
-Provision::Provision(Device * device) : WiFi(), ProvisionEventGroup(), HTTPServer(), HTTPClient(), Ping(), MQTTClient(), BLEProvision()
+Provision::Provision(Device * device) : WiFi(), ProvisionEventGroup(), HTTPServer(), HTTPClient(), Ping(), MQTTClient()
 {
     mDevice = device;
     provision = this;
@@ -439,7 +432,7 @@ esp_err_t Provision::Connect()
     HTTPClient::HTTPClientSetHeader("Content-Type", "application/json");
 
     std::string initRequest;
-    if (CreateInitializationEndpointRequestCreate(&initRequest) != ESP_OK)
+    if (CreateInitializationEndpointRequestCreate(&initRequest,mTemplateVersion) != ESP_OK)
     {
         ESP_LOGE(TAG, "Create Initialization Endpoint Request Failed");
         return ESP_FAIL;
@@ -483,7 +476,6 @@ esp_err_t Provision::Connect()
     ESP_LOGI(TAG, "Device Sub Topic : %s", mDeviceSubTopic.c_str());
     ESP_LOGI(TAG, "Device Pub Topic : %s", mDevicePubTopic.c_str());
     ESP_LOGI(TAG, "Encryption Key : %s", mEncryptionKey.c_str());
-    ESP_LOGI(TAG, "MQTT Connection Verification : %d", mMQTTConnectionVerification);
 
     Message::EncryptionEnable(false);
     if (!mEncryptionKey.empty())
@@ -503,514 +495,11 @@ esp_err_t Provision::Connect()
     message->SetCommandType(Message::CommandType::COMMAND_TYPE_DISCONNECTED);
     mMQTTLastWillMessage = std::string(message->ToString());
     ESP_LOGI(TAG, "Disconnected message : %s", mMQTTLastWillMessage.c_str());
-    mDevice->MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(mDevice->MQTTEventHandlerDevice)->Context(mDevice)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->Init()->Register(MQTT_EVENT_ANY, mDevice)->Start();
+    mDevice->MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(mDevice->MQTTEventHandlerDevice)->Context(mDevice)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->TaskPriority(3)->Init()->Register(MQTT_EVENT_ANY, mDevice)->Start();
     return ESP_OK;
 }
 
-void Provision::GAPEventHandler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t * param)
-{
-    ESP_LOGI(TAG, "GAP event : %d", event);
-    switch (event)
-    {
-        case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
-            BLEProvision::StartAdvertising();
-            break;
-        case ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT:
-            BLEProvision::StartAdvertising();
-            break;
-        case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
-            break;
-        case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
-            break;
-        case ESP_GAP_BLE_EVT_MAX:
-            break;
-        default:
-            break;
-    }
-}
-
-void Provision::GATTEventHandler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t * param)
-{
-    ESP_LOGI(TAG, "GATT event : %d", event);
-
-    esp_err_t ErrorCode = ESP_OK;
-    switch (event)
-    {
-        case ESP_GATTS_REG_EVT:
-        {
-            BLEProvision::BLEGAPConfigure();
-            BLEProvision::ble_onboarding_profile.gatts_if = gatts_if;
-            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gatts_create_service(gatts_if, &ble_onboarding_profile.wifi_scan->service_id, ble_onboarding_profile.wifi_scan->service_num_handle));
-            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gatts_create_service(gatts_if, &ble_onboarding_profile.wifi_config->service_id, ble_onboarding_profile.wifi_config->service_num_handle));
-            ESP_LOGI(TAG, "app_id : %04x, status : %d", param->reg.app_id, param->reg.status);
-        }
-        break;
-        case ESP_GATTS_CREATE_EVT:
-        {
-            if (param->create.service_id.id.uuid.uuid.uuid16 == BLEProvision::WIFI_SCAN_SERVICE_UUID)
-            {
-                ble_onboarding_profile.wifi_scan->service_handle = param->create.service_handle;
-                ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gatts_start_service(ble_onboarding_profile.wifi_scan->service_handle));
-                for (int i = 0; i < ble_onboarding_profile.wifi_scan->charas_num; i++)
-                {
-                    ESP_LOGI(TAG, "I : %d", i);
-                    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gatts_add_char(ble_onboarding_profile.wifi_scan->service_handle, &ble_onboarding_profile.wifi_scan->charas[i]->char_uuid, ble_onboarding_profile.wifi_scan->charas[i]->perm, ble_onboarding_profile.wifi_scan->charas[i]->property, &ble_onboarding_profile.wifi_scan->charas[i]->val, ESP_GATT_RSP_BY_APP));
-                }
-            }
-            else if (param->create.service_id.id.uuid.uuid.uuid16 == BLEProvision::WIFI_CONF_SERVICE_UUID)
-            {
-                ble_onboarding_profile.wifi_config->service_handle = param->create.service_handle;
-                esp_ble_gatts_start_service(ble_onboarding_profile.wifi_config->service_handle);
-                for (int i = 0; i < ble_onboarding_profile.wifi_config->charas_num; i++)
-                {
-                    esp_ble_gatts_add_char(ble_onboarding_profile.wifi_config->service_handle, &ble_onboarding_profile.wifi_config->charas[i]->char_uuid, ble_onboarding_profile.wifi_config->charas[i]->perm, ble_onboarding_profile.wifi_config->charas[i]->property, &ble_onboarding_profile.wifi_config->charas[i]->val, ESP_GATT_RSP_BY_APP);
-                }
-            }
-            else
-            {
-            }
-        }
-        break;
-        case ESP_GATTS_ADD_CHAR_EVT:
-        {
-            if (param->add_char.service_handle == ble_onboarding_profile.wifi_scan->service_handle)
-            {
-                for (int i = 0; i < ble_onboarding_profile.wifi_scan->charas_num; i++)
-                {
-                    if (param->add_char.char_uuid.len == ble_onboarding_profile.wifi_scan->charas[i]->char_uuid.len && param->add_char.char_uuid.uuid.uuid16 == ble_onboarding_profile.wifi_scan->charas[i]->char_uuid.uuid.uuid16)
-                    {
-                        ble_onboarding_profile.wifi_scan->charas[i]->char_handle = param->add_char.attr_handle;
-                    }
-                }
-            }
-            else if (param->add_char.service_handle == ble_onboarding_profile.wifi_config->service_handle)
-            {
-                for (int i = 0; i < ble_onboarding_profile.wifi_config->charas_num; i++)
-                {
-                    if (param->add_char.char_uuid.len == ble_onboarding_profile.wifi_config->charas[i]->char_uuid.len && param->add_char.char_uuid.uuid.uuid16 == ble_onboarding_profile.wifi_config->charas[i]->char_uuid.uuid.uuid16)
-                    {
-                        ble_onboarding_profile.wifi_config->charas[i]->char_handle = param->add_char.attr_handle;
-                    }
-                }
-            }
-            else
-            {
-            }
-        }
-        break;
-        case ESP_GATTS_ADD_CHAR_DESCR_EVT:
-        {
-            if (param->add_char_descr.service_handle == ble_onboarding_profile.wifi_scan->service_handle)
-            {
-                for (int i = 0; i < ble_onboarding_profile.wifi_scan->charas_num; i++)
-                {
-                    if (param->add_char_descr.descr_uuid.len == ble_onboarding_profile.wifi_scan->charas[i]->descr_uuid.len && param->add_char_descr.descr_uuid.uuid.uuid16 == ble_onboarding_profile.wifi_scan->charas[i]->descr_uuid.uuid.uuid16)
-                    {
-                        ble_onboarding_profile.wifi_scan->charas[i]->descr_handle = param->add_char_descr.attr_handle;
-                    }
-                }
-            }
-            else if (param->add_char_descr.service_handle == ble_onboarding_profile.wifi_config->service_handle)
-            {
-                for (int i = 0; i < ble_onboarding_profile.wifi_config->charas_num; i++)
-                {
-                    if (param->add_char_descr.descr_uuid.len == ble_onboarding_profile.wifi_config->charas[i]->descr_uuid.len && param->add_char_descr.descr_uuid.uuid.uuid16 == ble_onboarding_profile.wifi_config->charas[i]->descr_uuid.uuid.uuid16)
-                    {
-                        ble_onboarding_profile.wifi_config->charas[i]->descr_handle = param->add_char_descr.attr_handle;
-                    }
-                }
-            }
-            else
-            {
-            }
-        }
-        break;
-        case ESP_GATTS_READ_EVT:
-        {
-            esp_gatt_rsp_t * esp_gatt_rsp = (esp_gatt_rsp_t *) calloc(1, sizeof(esp_gatt_rsp_t));
-            if (param->read.handle == ble_onboarding_profile.wifi_scan->charas[0]->char_handle)
-            {
-                esp_gatt_rsp->attr_value.len = 1;
-                esp_gatt_rsp->attr_value.value[0] = 6;
-                provision->WiFiScanEventGroup::EventGroupGetBits();
-                provision->WiFiSTAEventGroup::EventGroupGetBits();
-                if (provision->WiFiScanEventGroup::IsEventGroupBitSet(EG_SCAN_IDLE))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 0;
-                }
-
-                if (provision->WiFiScanEventGroup::IsEventGroupBitSet(EG_SCAN_COMPLETED))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 3;
-                }
-                else if (provision->WiFiScanEventGroup::IsEventGroupBitSet(EG_SCAN_INPROCESS))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 2;
-                }
-
-                if (provision->WiFiSTAEventGroup::IsEventGroupBitSet(EG_STA_CONNECTED))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 5;
-                }
-                else if (provision->WiFiSTAEventGroup::IsEventGroupBitSet(EG_STA_DISCONNECT))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 7;
-                }
-                else if (provision->WiFiSTAEventGroup::IsEventGroupBitSet(EG_STA_CONNECTING))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 8;
-                }
-                ESP_LOGI(TAG, "WIFI SCAN : %d", esp_gatt_rsp->attr_value.value[0]);
-            }
-            else if (param->read.handle == ble_onboarding_profile.wifi_scan->charas[1]->char_handle)
-            {
-                static char * scan_result = nullptr;
-                static uint16_t scanEntries = 0;
-
-                esp_gatt_rsp->attr_value.handle = param->read.handle;
-                esp_gatt_rsp->attr_value.offset = param->read.offset;
-                if (param->read.is_long == true)
-                {
-                    ESP_LOGI(TAG, "Sending response from fetch results");
-                    esp_gatt_rsp->attr_value.len = strlen(scan_result) - param->read.offset;
-                }
-                else
-                {
-                    ESP_LOGI(TAG, "Fetching new scan result");
-                    scanEntries = provision->GetScanEntries();
-                    cJSON * arr;
-                    arr = cJSON_CreateArray();
-                    for (int i = 0; i < scanEntries; i++)
-                    {
-                        cJSON * entry;
-                        entry = cJSON_CreateObject();
-                        cJSON_AddStringToObject(entry, "ssid", provision->WiFiStationScan::SSID(i).c_str());
-                        cJSON_AddStringToObject(entry, "auth", provision->WiFiStationScan::EncryptionType(i).c_str());
-                        cJSON_AddNumberToObject(entry, "rssi", provision->WiFiStationScan::RSSI(i));
-                        cJSON_AddItemToArray(arr, entry);
-                        ESP_LOGI(TAG, "SSID : %s, RSSI : %d, Encryption Type : %s", provision->WiFiStationScan::SSID(i).c_str(), provision->WiFiStationScan::RSSI(i), provision->WiFiStationScan::EncryptionType(i).c_str());
-                    }
-
-                    scan_result = cJSON_PrintUnformatted(arr);
-                    ESP_LOG_BUFFER_HEX(__func__, scan_result, strlen(scan_result));
-                    ESP_LOGI(TAG, "data : %s, len : %d", scan_result, strlen(scan_result));
-                    esp_gatt_rsp->attr_value.len = strlen(scan_result);
-                }
-                memcpy(esp_gatt_rsp->attr_value.value, &scan_result[param->read.offset], esp_gatt_rsp->attr_value.len);
-            }
-            else if (param->read.handle == ble_onboarding_profile.wifi_config->charas[0]->char_handle)
-            {
-                esp_gatt_rsp->attr_value.len = 1;
-                provision->PingEventGroup::EventGroupGetBits();
-                if (provision->PingEventGroup::IsEventGroupBitSet(EG_PING_SUCCESS))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 2;
-                }
-                else if (provision->PingEventGroup::IsEventGroupBitSet(EG_PING_PROCESSED))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 1;
-                }
-                else if (provision->PingEventGroup::IsEventGroupBitSet(EG_PING_PROCESSING))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 4;
-                }
-                else if (provision->PingEventGroup::IsEventGroupBitSet(EG_PING_IDLE))
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 0;
-                }
-                else
-                {
-                    esp_gatt_rsp->attr_value.value[0] = 3;
-                }
-
-                if (esp_gatt_rsp->attr_value.value[0] == 2)
-                {
-                    provision->ProvisionEventGroup::EventGroupSetBits(ProvisionEventGroup::EG_PROVISION_AP_HTTP_SERVER_COMPLETED);
-                }
-
-                ESP_LOGI(TAG, "WIFI CONFIG : %d", esp_gatt_rsp->attr_value.value[0]);
-            }
-            else
-            {
-            }
-
-            esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, esp_gatt_rsp);
-            free(esp_gatt_rsp);
-        }
-        break;
-        case ESP_GATTS_WRITE_EVT:
-        {
-            ESP_LOGI(TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d", param->write.conn_id, param->write.trans_id, param->write.handle);
-
-            esp_gatt_rsp_t * esp_gatt_rsp = (esp_gatt_rsp_t *) calloc(1, sizeof(esp_gatt_rsp_t));
-            if (param->write.handle == ble_onboarding_profile.wifi_scan->charas[0]->char_handle)
-            {
-                if (param->write.value[0] == WIFI_SCANNER_STATE_SCAN)
-                {
-                    WiFiScanStatus wifiScanStatus = provision->Scan(false);
-                }
-            }
-            else if (param->write.handle == ble_onboarding_profile.wifi_config->charas[1]->char_handle)
-            {
-                if (param->write.need_rsp)
-                {
-                    ESP_LOGI(TAG, "needs response");
-                    if (param->write.is_prep)
-                    {
-                        ESP_LOGI(TAG, "is prep");
-                    }
-                    else
-                    {
-                        std::string config_write;
-                        std::string initializationEndpoint;
-                        std::string validationEndpoint;
-                        std::string configKey;
-                        std::string ipAddress;
-
-                        config_write = std::string((char *) param->write.value, param->write.len);
-                        ESP_LOGI(TAG, "CONFIG other : %s", config_write.c_str());
-
-                        ErrorCode = ( JSONParser::JSONParserParseValueByKey(&validationEndpoint, "device_validation_endpoint", config_write) ||
-                                     JSONParser::JSONParserParseValueByKey(&initializationEndpoint, "device_initialization_endpoint", config_write) ||
-                                     JSONParser::JSONParserParseValueByKey(&configKey, "validation_token", config_write) ||
-                                     JSONParser::JSONParserParseValueByKey(&ipAddress, "server_ip_address", config_write) );
-
-                        if (ErrorCode != ESP_OK)
-                        {
-                            ESP_LOGI(TAG, "error while parsing ");
-                        }
-                        provision->PingIPv4Address(ipAddress, 0);
-
-                        provision->mValidationEndpoint = validationEndpoint;
-                        provision->mInitializationEndpoint = initializationEndpoint;
-                        provision->mConfigKey = configKey;
-                        provision->mIPAddress = ipAddress;
-                    }
-                }
-            }
-            else if (param->write.handle == ble_onboarding_profile.wifi_scan->charas[2]->char_handle)
-            {
-                if (param->write.need_rsp)
-                {
-                    ESP_LOGI(TAG, "needs response");
-                    if (param->write.is_prep)
-                    {
-                        ESP_LOGI(TAG, "is prep");
-                    }
-                    else
-                    {
-                        std::string config_write;
-                        std::string sta_ssid;
-                        std::string sta_password;
-
-                        config_write = std::string((char *) param->write.value, param->write.len);
-                        ESP_LOGI(TAG, "CONFIG SSID PASSWORD : %s", config_write.c_str());
-
-                        ErrorCode = ( JSONParser::JSONParserParseValueByKey(&sta_ssid, "ssid", config_write) ||
-                                     JSONParser::JSONParserParseValueByKey(&sta_password, "psk", config_write) );
-
-                        if (ErrorCode != ESP_OK)
-                        {
-                            ESP_LOGI(TAG, "error while parsing ");
-                        }
-                        provision->WiFiStation::Disconnect();
-                        provision->STAConfig(sta_ssid, sta_password, 0, nullptr, true);
-                        provision->WiFiSTAEventGroup::EventGroupSetBits(EG_STA_CONNECTING);
-                        provision->mSSID = sta_ssid;
-                        provision->mPSK = sta_password;
-                        ESP_LOGI(TAG, "SSID : %s", sta_ssid.c_str());
-                        ESP_LOGI(TAG, "PSK : %s", sta_password.c_str());
-                    }
-                }
-            }
-
-            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, esp_gatt_rsp);
-            free(esp_gatt_rsp);
-        }
-        break;
-        case ESP_GATTS_EXEC_WRITE_EVT:
-            esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
-            break;
-        case ESP_GATTS_START_EVT:
-            break;
-        case ESP_GATTS_CONNECT_EVT:
-            BLEProvision::StopAdvertising();
-            break;
-        case ESP_GATTS_DISCONNECT_EVT:
-            BLEProvision::StartAdvertising();
-            break;
-        case ESP_GATTS_RESPONSE_EVT:
-            ESP_LOGI(TAG, "handle : %d; status : %d", param->rsp.handle, param->rsp.status);
-            break;
-        case ESP_GATTS_CREAT_ATTR_TAB_EVT:
-            break;
-        default:
-            break;
-    }
-}
-
-esp_err_t Provision::StartProvisioningBLE()
-{
-    if (Provision::RetriveData() == ESP_OK)
-    {
-        ESP_LOGI(TAG, "Retrived Data success");
-        mProvComplete = true;
-        WiFi::EnableAP(false);
-        return ESP_OK;
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Retrived Data failed");
-    }
-
-    WiFi::Start();
-    WiFi::EnableSTA(true);
-    SetAutoReconnect(false);
-
-    /* BLE */
-    BLEProvision::Init();
-    BLEProvision::SetName(mDevice->mName);
-    BLEProvision::SetGAPCallback(Provision::GAPEventHandler);
-    BLEProvision::SetGATTCallback(Provision::GATTEventHandler);
-    BLEProvision::ConfigureProvisionGATT();
-    BLEProvision::Start();
-
-    ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_AP_HTTP_SERVER_COMPLETED | ProvisionEventGroup::EG_PROVISION_BLE_COMPLETED | ProvisionEventGroup::EG_PROVISION_ABORTED, false, false, portMAX_DELAY);
-    vTaskDelay(pdMS_TO_TICKS(1000)); //  wait for client to receive the HTTP response
-    BLEProvision::Stop();
-    BLEProvision::Deinit();
-
-    if (ProvisionEventGroup::IsEventGroupBitSet(ProvisionEventGroup::EG_PROVISION_ABORTED))
-    {
-        ESP_LOGE(TAG, "Provisioning failed from device side");
-        return ESP_FAIL;
-    }
-
-    HTTPClient::HTTPClientInit();
-    HTTPClient::HTTPClientSetURL(mValidationEndpoint);
-    HTTPClient::HTTPClientSetMethod(HTTP_METHOD_POST);
-    HTTPClient::HTTPClientSetHeader("Authorization", "Bearer " + mConfigKey);
-    HTTPClient::HTTPClientSetHeader("Content-Type", "application/json");
-    if (HTTPClient::HTTPClientPerform() != ESP_OK)
-    {
-        ESP_LOGI(TAG, "Failed to perform");
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "Response Content Length : %d", HTTPClient::HTTPClientGetContentLength());
-    ESP_LOGI(TAG, "Response Status Code : %d", HTTPClient::HTTPClientGetStatusCode());
-
-    std::string response;
-    HTTPClient::HTTPClientReadResponse(&response);
-    ESP_LOGI(TAG, "Response : %s", response.c_str());
-    if (HTTPClient::HTTPClientGetStatusCode() != 200)
-    {
-        ESP_LOGE(TAG, "Error HTTP Client");
-        return ESP_FAIL;
-    }
-
-    FetchAPIKeyFromResponse(response);
-    ESP_LOGI(TAG, "API Key : %s", mAPIKey.c_str());
-
-    /* Create intialization endpoint request here */
-    HTTPClient::HTTPClientSetURL(mInitializationEndpoint);
-    HTTPClient::HTTPClientSetMethod(HTTP_METHOD_POST);
-    HTTPClient::HTTPClientSetHeader("X-API-KEY", mAPIKey);
-    HTTPClient::HTTPClientSetHeader("Content-Type", "application/json");
-    std::string initRequest;
-    /* Create POST Field */
-    if (CreateInitializationEndpointRequestCreate(&initRequest) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Create Initialization Endpoint Request Failed");
-    }
-    /**/
-    ESP_LOGI(TAG, "Init Request %s", initRequest.c_str());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(HTTPClient::HTTPClientSetPostField(&initRequest));
-    if (HTTPClient::HTTPClientPerform() != ESP_OK)
-    {
-        ESP_LOGI(TAG, "Failed to perform");
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "Response Content Length : %d", HTTPClient::HTTPClientGetContentLength());
-    ESP_LOGI(TAG, "Response Status Code : %d", HTTPClient::HTTPClientGetStatusCode());
-
-    HTTPClient::HTTPClientReadResponse(&response);
-    ESP_LOGI(TAG, "Response : %s", response.c_str());
-    if (HTTPClient::HTTPClientGetStatusCode() != 200)
-    {
-        ESP_LOGE(TAG, "Error HTTP Client with %d", HTTPClient::HTTPClientGetStatusCode());
-        return ESP_FAIL;
-    }
-    HTTPClient::HTTPClientCleanup();
-
-    FetchDataFromInitResponse(response);
-    if (mMQTTURI.empty() || mMQTTClient.empty() || mDeviceSubTopic.empty() || mDevicePubTopic.empty() || mDataPubTopic.empty() || mDataSubTopic.empty())
-    {
-        ESP_LOGE(TAG, "Fetch data from Init response failed");
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "MQTT URI : %s", mMQTTURI.c_str());
-    ESP_LOGI(TAG, "MQTT Client ID : %s", mMQTTClient.c_str());
-    ESP_LOGI(TAG, "Device Sub Topic : %s", mDeviceSubTopic.c_str());
-    ESP_LOGI(TAG, "Device Pub Topic : %s", mDevicePubTopic.c_str());
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Encryption Key : %s", mEncryptionKey.c_str());
-    ESP_LOGI(TAG, "MQTT Connection Verification : %d", mMQTTConnectionVerification);
-
-    Message::EncryptionEnable(false);
-    if (mEncryptionKey.data())
-    {
-        PayloadEncryption::Init();
-        Message::EncryptionEnable(true);
-        PayloadEncryption::SetEncryptionKey(mEncryptionKey);
-    }
-
-    MessageCreate * message = new MessageCreate();
-    message->SetCommandType(Message::CommandType::COMMAND_TYPE_ACTIVATION);
-    message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-    mMQTTLastWillMessage = std::string(message->ToString());
-    MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(MQTTEventHandlerProvision)->Context(this)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->Init()->Register(MQTT_EVENT_ANY, this)->Start();
-
-    ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_PENDING, false, false, portMAX_DELAY);
-    message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_PENDING);
-    MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
-    ESP_LOGI(TAG, "ACTIVATION PENDING SENT");
-    ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_SUCCESS | ProvisionEventGroup::EG_PROVISION_ACTIVATION_FAILED, false, false, pdMS_TO_TICKS(50000));
-
-    if (ProvisionEventGroup::IsEventGroupBitSet(ProvisionEventGroup::EG_PROVISION_ACTIVATION_SUCCESS))
-    {
-        ESP_LOGI(TAG, "ACTIVATION SUCCESS");
-        if (Provision::SaveData() != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Error saving data to nvs");
-        }
-        mProvComplete = true;
-    }
-    else if (ProvisionEventGroup::IsEventGroupBitSet(ProvisionEventGroup::EG_PROVISION_ACTIVATION_FAILED))
-    {
-        ESP_LOGI(TAG, "ACTIVATION FAILED");
-        message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-        MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
-        mProvComplete = false;
-    }
-    else
-    {
-        ESP_LOGE(TAG, "ACTIVATION FAILED DUE TO TIMEOUT");
-        message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-        MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
-        mProvComplete = false;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(500));
-
-    MQTTClient::Disconnect();
-    MQTTClient::Stop();
-    MQTTClient::Distroy();
-
-    return ESP_OK;
-}
-
-esp_err_t Provision::StartProvisioningWiFi()
+esp_err_t Provision::StartProvisioningWiFi(std::string name)
 {
     if (Provision::RetriveData() == ESP_OK)
     {
@@ -1030,7 +519,7 @@ esp_err_t Provision::StartProvisioningWiFi()
     SoftAPConfig(ipAddress, gateway, netmask);
     EnableSTA(true);
     SetAutoReconnect(false);
-    SoftAPConfig("iLCjdpHWkgSQ" + mDevice->mName, "vA2Jk0PperQX");
+    SoftAPConfig("iLCjdpHWkgSQ" + name, "vA2Jk0PperQX");
     // // STAConfig("IndhiDL", "7709770004");
     HTTPServer::Start();
     HTTPServer::Register("/scan", mWifiScanRequestHandler, HTTP_GET, this);
@@ -1080,7 +569,7 @@ esp_err_t Provision::StartProvisioningWiFi()
     HTTPClient::HTTPClientSetHeader("Content-Type", "application/json");
     std::string initRequest;
     /* Create POST Field */
-    if (CreateInitializationEndpointRequestCreate(&initRequest) != ESP_OK)
+    if (CreateInitializationEndpointRequestCreate(&initRequest, "0") != ESP_OK)
     {
         ESP_LOGE(TAG, "Create Initialization Endpoint Request Failed");
     }
@@ -1118,7 +607,6 @@ esp_err_t Provision::StartProvisioningWiFi()
     ESP_LOGI(TAG, "");
     
     ESP_LOGI(TAG, "Encryption Key : %s", mEncryptionKey.c_str());
-    ESP_LOGI(TAG, "MQTT Connection Verification : %d", mMQTTConnectionVerification);
 
     Message::EncryptionEnable(false);
     if (mEncryptionKey.data())
@@ -1132,185 +620,7 @@ esp_err_t Provision::StartProvisioningWiFi()
     message->SetCommandType(Message::CommandType::COMMAND_TYPE_ACTIVATION);
     message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
     mMQTTLastWillMessage = std::string(message->ToString());
-    MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(MQTTEventHandlerProvision)->Context(this)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->Init()->Register(MQTT_EVENT_ANY, this)->Start();
-
-    ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_PENDING, false, false, portMAX_DELAY);
-    message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_PENDING);
-    MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
-    ESP_LOGI(TAG, "ACTIVATION PENDING SENT");
-    ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_SUCCESS | ProvisionEventGroup::EG_PROVISION_ACTIVATION_FAILED, false, false, pdMS_TO_TICKS(50000));
-
-    if (ProvisionEventGroup::IsEventGroupBitSet(ProvisionEventGroup::EG_PROVISION_ACTIVATION_SUCCESS))
-    {
-        ESP_LOGI(TAG, "ACTIVATION SUCCESS");
-        if (Provision::SaveData() != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Error saving data to nvs");
-        }
-        else
-        {
-            mProvComplete = true;
-        }
-    }
-    else if (ProvisionEventGroup::IsEventGroupBitSet(ProvisionEventGroup::EG_PROVISION_ACTIVATION_FAILED))
-    {
-        ESP_LOGI(TAG, "ACTIVATION FAILED");
-        message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-        MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
-        mProvComplete = false;
-    }
-    else
-    {
-        ESP_LOGE(TAG, "ACTIVATION FAILED DUE TO TIMEOUT");
-        message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-        MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
-        mProvComplete = false;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(500));
-
-    MQTTClient::Disconnect();
-    MQTTClient::Stop();
-    MQTTClient::Distroy();
-
-    return ESP_OK;
-}
-
-/* For token based onboarding */
-esp_err_t Provision::StartProvisioningWiFi(std::string ssid, std::string psk, std::string token)
-{
-    if (Provision::RetriveData() == ESP_OK)
-    {
-        ESP_LOGI(TAG, "Retrived Data success");
-        mProvComplete = true;
-        WiFi::EnableAP(false);
-        return ESP_OK;
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Retrived Data failed");
-    }
-
-    if (ssid.empty() || psk.empty() || token.empty())
-    {
-        ESP_LOGE(TAG, "One or many fields are empty");
-        return ESP_FAIL;
-    }
-
-    Provision::SetConfigKey(token);
-    mSSID = ssid;
-    mPSK = psk;
-
-    EnableSTA(true);
-    STAConfig(mSSID, mPSK);
-    SetAutoReconnect(false);
-
-    WiFiSTAEventGroup::EventGroupWaitBits(WiFiSTAEventGroup::EG_STA_CONNECTED, false, false, pdMS_TO_TICKS(20000));
-    vTaskDelay(pdMS_TO_TICKS(5000));
-    if (WiFiSTAEventGroup::IsEventGroupBitSet(WiFiSTAEventGroup::EG_STA_CONNECTED))
-    {
-        ESP_LOGI(TAG, "STA connection success");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "STA connection failed");
-        return ESP_FAIL;
-    }
-    // ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_AP_HTTP_SERVER_COMPLETED | EG_PROVISION_BLE_COMPLETED, false, false, portMAX_DELAY);
-
-    HTTPClient::HTTPClientInit();
-    HTTPClient::HTTPClientSetURL(mValidationEndpoint);
-    HTTPClient::HTTPClientSetMethod(HTTP_METHOD_POST);
-    HTTPClient::HTTPClientSetHeader("Authorization", "Bearer " + mConfigKey);
-    HTTPClient::HTTPClientSetHeader("Content-Type", "application/json");
-    if (HTTPClient::HTTPClientPerform() != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to perform");
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "Response Content Length : %d", HTTPClient::HTTPClientGetContentLength());
-    ESP_LOGI(TAG, "Response Status Code : %d", HTTPClient::HTTPClientGetStatusCode());
-
-    std::string response;
-    HTTPClient::HTTPClientReadResponse(&response);
-    ESP_LOGI(TAG, "Response : %s", response.c_str());
-    if (HTTPClient::HTTPClientGetStatusCode() != 200)
-    {
-        ESP_LOGE(TAG, "Error HTTP Client");
-        return ESP_FAIL;
-    }
-
-    FetchAPIKeyFromResponse(response);
-    ESP_LOGI(TAG, "API Key : %s", mAPIKey.c_str());
-
-    /* Create intialization endpoint request here */
-    HTTPClient::HTTPClientSetURL(mInitializationEndpoint);
-    HTTPClient::HTTPClientSetMethod(HTTP_METHOD_POST);
-    HTTPClient::HTTPClientSetHeader("X-API-KEY", mAPIKey);
-    HTTPClient::HTTPClientSetHeader("Content-Type", "application/json");
-    std::string initRequest;
-    /* Create POST Field */
-    if (CreateInitializationEndpointRequestCreate(&initRequest) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Create Initialization Endpoint Request Failed");
-        return ESP_FAIL;
-    }
-    /**/
-    ESP_LOGI(TAG, "Init Request %s", initRequest.c_str());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(HTTPClient::HTTPClientSetPostField(&initRequest));
-    if (HTTPClient::HTTPClientPerform() != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to perform");
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "Response Content Length : %d", HTTPClient::HTTPClientGetContentLength());
-    ESP_LOGI(TAG, "Response Status Code : %d", HTTPClient::HTTPClientGetStatusCode());
-
-    HTTPClient::HTTPClientReadResponse(&response);
-    ESP_LOGI(TAG, "Response : %s", response.c_str());
-    if (HTTPClient::HTTPClientGetStatusCode() != 200)
-    {
-        ESP_LOGE(TAG, "Error HTTP Client");
-        return ESP_FAIL;
-    }
-    HTTPClient::HTTPClientCleanup();
-
-    /* Fetch Response data here */
-    /* MQTT URI, CLIENT ID, DEVICE SUB TOPIC, DEVICE PUB TOPIC */
-    /* FEATURE SUB TOPIC,FEATURE PUB TOPIC, VERSION CODE, IDENTIFIER */
-    /* MCV REQUIRED, EDKEY */
-
-    FetchDataFromInitResponse(response);
-    if (mMQTTURI.empty() || mMQTTClient.empty() || mDeviceSubTopic.empty() || mDevicePubTopic.empty() || mDataPubTopic.empty() || mDataSubTopic.empty())
-    {
-        ESP_LOGE(TAG, "Fetch data from Init response failed");
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "MQTT URI : %s", mMQTTURI.c_str());
-    ESP_LOGI(TAG, "MQTT Client ID : %s", mMQTTClient.c_str());
-    ESP_LOGI(TAG, "Device Sub Topic : %s", mDeviceSubTopic.c_str());
-    ESP_LOGI(TAG, "Device Pub Topic : %s", mDevicePubTopic.c_str());
-
-    ESP_LOGI(TAG, "Encryption Key : %s", mEncryptionKey.c_str());
-    ESP_LOGI(TAG, "MQTT Connection Verification : %d", mMQTTConnectionVerification);
-
-    /* Start the Provisioning MQTT Client */
-    /* if mcv is true handle the mqtt events here */
-    /* if not handle the mqtt events in the device */
-    Message::EncryptionEnable(false);
-    if (mEncryptionKey.data())
-    {
-        PayloadEncryption::Init();
-        Message::EncryptionEnable(true);
-        PayloadEncryption::SetEncryptionKey(mEncryptionKey);
-    }
-
-    MessageCreate * message = new MessageCreate();
-    message->SetCommandType(Message::CommandType::COMMAND_TYPE_ACTIVATION);
-    message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-    mMQTTLastWillMessage = std::string(message->ToString());
-    MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(MQTTEventHandlerProvision)->Context(this)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->Init()->Register(MQTT_EVENT_ANY, this)->Start();
+    MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(MQTTEventHandlerProvision)->Context(this)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->TaskPriority(3)->Init()->Register(MQTT_EVENT_ANY, this)->Start();
 
     ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_PENDING, false, false, portMAX_DELAY);
     message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_PENDING);
@@ -1356,10 +666,7 @@ esp_err_t Provision::StartProvisioningWiFi(std::string ssid, std::string psk, st
 
 void Provision::EraseData()
 {
-    NVStorage::Erase("SSID");
-    NVStorage::Erase("PSK");
-    NVStorage::Erase("APIKey");
-    NVStorage::Erase("InitEndp");
+    NVStorage::Erase();
 }
 
 esp_err_t Provision::RetriveData()
@@ -1367,16 +674,34 @@ esp_err_t Provision::RetriveData()
     return ( NVStorage::Get("SSID", &mSSID) ||
             NVStorage::Get("PSK", &mPSK) ||
             NVStorage::Get("APIKey", &mAPIKey) ||
-            NVStorage::Get("InitEndp", &mInitializationEndpoint) );
+            NVStorage::Get("InitEndp", &mInitializationEndpoint) ||
+            NVStorage::Get("TV", &mTemplateVersion) );
 }
 
 esp_err_t Provision::SaveData()
 {
-    return ( NVStorage::Set("SSID", mSSID) ||
+
+    esp_err_t err;
+
+    for (int i = 0; i < mDevice->mConfigs.size(); i++)
+    {
+        ESP_LOGE(TAG, "config data : %s -- %f", mDevice->mConfigs.at(i)->mVar.c_str(),mDevice->mConfigs.at(i)->mValue);
+
+        err = NVStorage::putDouble(mDevice->mConfigs.at(i)->mVar.c_str(), mDevice->mConfigs.at(i)->mValue);
+        if (err != ESP_OK)
+        {
+            return ESP_FAIL;
+        }
+    }
+
+    err = ( NVStorage::Set("SSID", mSSID) ||
             NVStorage::Set("PSK", mPSK) ||
             NVStorage::Set("APIKey", mAPIKey) ||
             NVStorage::Set("InitEndp", mInitializationEndpoint) ||
+            NVStorage::Set("TV", mTemplateVersion) ||
             NVStorage::Commit() );
+
+    return err;
 }
 
 void Provision::StopProvisioning()
@@ -1384,7 +709,7 @@ void Provision::StopProvisioning()
     HTTPServer::Stop();
 }
 
-esp_err_t Provision::CreateInitializationEndpointRequestCreate(std::string * request)
+esp_err_t Provision::CreateInitializationEndpointRequestCreate(std::string * request, std::string templateVersion)
 {
     cJSON * mObj;
     char * str;
@@ -1398,9 +723,9 @@ esp_err_t Provision::CreateInitializationEndpointRequestCreate(std::string * req
         err = ESP_FAIL;
         goto end;
     }
-    cJSON_AddItemToObject(mObj, "version", cJSON_CreateString("2"));
-    cJSON_AddItemToObject(mObj, "deviceName", cJSON_CreateString(mDevice->mName.c_str()));
-    cJSON_AddItemToObject(mObj, "templateId", cJSON_CreateString(mDevice->mTemplateId.c_str()));
+    cJSON_AddItemToObject(mObj, "tV", cJSON_CreateString(templateVersion.c_str()));
+    cJSON_AddItemToObject(mObj, "p", cJSON_CreateString("mqtt"));
+    cJSON_AddItemToObject(mObj, "tId", cJSON_CreateString(mDevice->mTemplateId.c_str()));
 
     str = cJSON_PrintUnformatted(mObj);
     *request = std::string(str);
@@ -1448,7 +773,7 @@ end:
 /* TODO : VERIFY THE FUNCTION */
 esp_err_t Provision::FetchDataFromInitResponse(std::string response)
 {
-    cJSON * Obj, * data, * mqttUri, * mqttClient, * deviceSubTopic, * devicePubTopic, * features, * encryptionKey, * mqttConnectionVerification;
+    cJSON * Obj, * data, * mqttUri, * mqttClient, * templateVersion, * topic, * encryptionKey, * configs;
     char * str;
     int num;
 
@@ -1466,7 +791,7 @@ esp_err_t Provision::FetchDataFromInitResponse(std::string response)
         goto end;
     }
 
-    mqttUri = cJSON_GetObjectItem(data, "mqttUri");
+    mqttUri = cJSON_GetObjectItem(data, "mu");
     if (mqttUri == NULL)
     {
         ESP_LOGE(TAG, "Error Parsing JSON mqttUri");
@@ -1475,7 +800,7 @@ esp_err_t Provision::FetchDataFromInitResponse(std::string response)
     str = cJSON_GetStringValue(mqttUri);
     mMQTTURI = std::string(str);
 
-    mqttClient = cJSON_GetObjectItem(data, "mqttClient");
+    mqttClient = cJSON_GetObjectItem(data, "mc");
     if (mqttClient == NULL)
     {
         ESP_LOGE(TAG, "Error Parsing JSON mqttClient");
@@ -1484,34 +809,16 @@ esp_err_t Provision::FetchDataFromInitResponse(std::string response)
     str = cJSON_GetStringValue(mqttClient);
     mMQTTClient = std::string(str);
 
-    deviceSubTopic = cJSON_GetObjectItem(data, "deviceSubTopic");
-    if (deviceSubTopic == NULL)
+    templateVersion = cJSON_GetObjectItem(data, "tV");
+    if (templateVersion == NULL)
     {
-        ESP_LOGE(TAG, "Error Parsing JSON deviceSubTopic");
+        ESP_LOGE(TAG, "Error Parsing JSON templateVersion");
         goto end;
     }
-    str = cJSON_GetStringValue(deviceSubTopic);
-    mDeviceSubTopic = std::string(str);
+    str = cJSON_GetStringValue(templateVersion);
+    mTemplateVersion = std::string(str);
 
-    devicePubTopic = cJSON_GetObjectItem(data, "devicePubTopic");
-    if (devicePubTopic == NULL)
-    {
-        ESP_LOGE(TAG, "Error Parsing JSON devicePubTopic");
-        goto end;
-    }
-    str = cJSON_GetStringValue(devicePubTopic);
-    mDevicePubTopic = std::string(str);
-
-    mqttConnectionVerification = cJSON_GetObjectItem(data, "mcvRequired");
-    if (mqttConnectionVerification == NULL)
-    {
-        ESP_LOGE(TAG, "Error Parsing JSON mqttConnectionVerification");
-        goto end;
-    }
-    num = cJSON_GetNumberValue(mqttConnectionVerification);
-    mMQTTConnectionVerification = num;
-
-    encryptionKey = cJSON_GetObjectItem(data, "edKey");
+    encryptionKey = cJSON_GetObjectItem(data, "ek");
     if (encryptionKey == NULL)
     {
         ESP_LOGE(TAG, "Error Parsing JSON encryptionKey");
@@ -1520,16 +827,50 @@ esp_err_t Provision::FetchDataFromInitResponse(std::string response)
     str = cJSON_GetStringValue(encryptionKey);
     mEncryptionKey = std::string(str);
 
-    cJSON * pubTopic, * subTopic;
+    topic = cJSON_GetObjectItem(data, "t");
+    if (topic == NULL)
+    {
+        ESP_LOGE(TAG, "Error Parsing JSON Topic");
+        goto end;
+    }
+    str = cJSON_GetStringValue(topic);
 
-    pubTopic = cJSON_GetObjectItem(data, "featurePubTopic");
-    subTopic = cJSON_GetObjectItem(data, "featureSubTopic");
-    
-    str = cJSON_GetStringValue(subTopic);
-    mDataSubTopic = std::string(str);
-    
-    str = cJSON_GetStringValue(pubTopic);
-    mDataPubTopic = std::string(str);
+    mDeviceSubTopic = std::string(str)+"/m/sub";
+    mDevicePubTopic = std::string(str)+"/m/pub";
+    mDataSubTopic = std::string(str)+"/d/sub";
+    mDataPubTopic = std::string(str)+"/d/pub";
+
+
+    configs = cJSON_GetObjectItem(data, "ds");
+    if (configs != NULL)
+    {
+        if (cJSON_IsArray(configs) == false)
+        {
+            ESP_LOGE(TAG, "Type Error configs is not array");   
+            goto end;
+        }
+
+        for (int i = 0; i < cJSON_GetArraySize(configs); i++)
+        {
+            cJSON * config, * var, * value;
+
+            config = cJSON_GetArrayItem(configs, i);
+
+            if (configs == NULL)
+            {
+                ESP_LOGE(TAG, "Error Parsing Element %d from array", 0);
+                goto end;
+            }
+
+            var = cJSON_GetObjectItem(config, "var");
+            value = cJSON_GetObjectItem(config, "value");
+
+            std::string mVar = std::string(cJSON_GetStringValue(var));
+
+            mDevice->AddConfig(new DeviceConfig(mVar,cJSON_GetNumberValue(value)));
+
+        }
+    }
 
 end:
     cJSON_Delete(Obj);
