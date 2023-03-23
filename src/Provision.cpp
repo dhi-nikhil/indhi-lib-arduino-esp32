@@ -1,4 +1,4 @@
-#define LOG_LOCAL_LEVEL ESP_LOG_NONE
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -10,7 +10,6 @@
 #include "EventGroup.h"
 #include "ProvisionEventLoop.h"
 #include "cJSON.h"
-#include "JSONParser.h"
 #include "System.h"
 #include "Utils.h"
 #include "Device.h"
@@ -616,15 +615,13 @@ esp_err_t Provision::StartProvisioningWiFi(std::string name)
         PayloadEncryption::SetEncryptionKey(mEncryptionKey);
     }
 
-    MessageCreate * message = new MessageCreate();
-    message->SetCommandType(Message::CommandType::COMMAND_TYPE_ACTIVATION);
-    message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-    mMQTTLastWillMessage = std::string(message->ToString());
+    mMQTTLastWillMessage = std::string(cJsonToActivationCmd(ACTIVATION_TIMEOUT));
     MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(MQTTEventHandlerProvision)->Context(this)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->TaskPriority(3)->Init()->Register(MQTT_EVENT_ANY, this)->Start();
 
     ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_PENDING, false, false, portMAX_DELAY);
-    message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_PENDING);
-    MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
+    
+
+    MQTTClient::Send(mDevicePubTopic, cJsonToActivationCmd(ACTIVATION_PENDING), 0, true);
     ESP_LOGI(TAG, "ACTIVATION PENDING SENT");
     ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_SUCCESS | ProvisionEventGroup::EG_PROVISION_ACTIVATION_FAILED, false, false, pdMS_TO_TICKS(50000));
 
@@ -643,15 +640,13 @@ esp_err_t Provision::StartProvisioningWiFi(std::string name)
     else if (ProvisionEventGroup::IsEventGroupBitSet(ProvisionEventGroup::EG_PROVISION_ACTIVATION_FAILED))
     {
         ESP_LOGI(TAG, "ACTIVATION FAILED");
-        message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-        MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
+        MQTTClient::Send(mDevicePubTopic, cJsonToActivationCmd(ACTIVATION_TIMEOUT), 1, true);
         mProvComplete = false;
     }
     else
     {
         ESP_LOGE(TAG, "ACTIVATION FAILED DUE TO TIMEOUT");
-        message->SetStatusType(Message::StatusType::STATUS_TYPE_ACTIVATION_TIMEOUT);
-        MQTTClient::Send(mDevicePubTopic, message->ToString(), 0, true);
+        MQTTClient::Send(mDevicePubTopic, cJsonToActivationCmd(ACTIVATION_TIMEOUT), 1, true);
         mProvComplete = false;
     }
 
@@ -770,12 +765,13 @@ end:
     return ESP_OK;
 }
 
-/* TODO : VERIFY THE FUNCTION */
 esp_err_t Provision::FetchDataFromInitResponse(std::string response)
 {
+
     cJSON * Obj, * data, * mqttUri, * mqttClient, * templateVersion, * topic, * encryptionKey, * configs;
     char * str;
-    int num;
+    
+    ESP_LOGI(TAG, "response : %s", response.c_str());
 
     Obj = cJSON_Parse(response.c_str());
     if (Obj == NULL)
@@ -799,6 +795,8 @@ esp_err_t Provision::FetchDataFromInitResponse(std::string response)
     }
     str = cJSON_GetStringValue(mqttUri);
     mMQTTURI = std::string(str);
+
+    ESP_LOGI(TAG, "mqttUri : %s", str);
 
     mqttClient = cJSON_GetObjectItem(data, "mc");
     if (mqttClient == NULL)
@@ -840,6 +838,10 @@ esp_err_t Provision::FetchDataFromInitResponse(std::string response)
     mDataSubTopic = std::string(str)+"/d/sub";
     mDataPubTopic = std::string(str)+"/d/pub";
 
+    ESP_LOGI(TAG, "Device Sub Topic : %s", mDeviceSubTopic.c_str());
+    ESP_LOGI(TAG, "Device Pub Topic : %s", mDevicePubTopic.c_str());
+    ESP_LOGI(TAG, "Data Sub Topic : %s", mDataSubTopic.c_str());
+    ESP_LOGI(TAG, "Data Pub Topic : %s", mDataPubTopic.c_str());
 
     configs = cJSON_GetObjectItem(data, "ds");
     if (configs != NULL)
@@ -875,4 +877,45 @@ esp_err_t Provision::FetchDataFromInitResponse(std::string response)
 end:
     cJSON_Delete(Obj);
     return ESP_OK;
+}
+
+
+std::string Provision::cJsonToActivationCmd(int value)
+{
+    cJSON *mObj, *eObj;
+
+    std::string stringified = "";
+    std::string encryptedData = "";
+    std::string iv = "";
+
+    char *str;
+
+    mObj = cJSON_CreateObject();
+    if (mObj == NULL)
+    {
+        ESP_LOGE(TAG, "Error Creating Object mObj");
+        goto end;
+    }
+
+    cJSON_AddStringToObject(mObj, "c", "a");
+    cJSON_AddNumberToObject(mObj, "v", value);
+
+    str = cJSON_PrintUnformatted(mObj);
+    stringified = std::string(str);
+    free(str);
+
+    PayloadEncryption::EncryptCBC(&encryptedData, &iv, stringified);
+
+    eObj = cJSON_CreateObject();
+    cJSON_AddStringToObject(eObj, "iv", iv.c_str());
+    cJSON_AddStringToObject(eObj, "eData", encryptedData.c_str());
+
+    str = cJSON_PrintUnformatted(eObj);
+    stringified = std::string(str);
+    free(str);
+
+    cJSON_Delete(eObj);
+end:
+    cJSON_Delete(mObj);
+    return stringified;
 }

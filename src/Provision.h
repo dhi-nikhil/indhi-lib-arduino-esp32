@@ -57,6 +57,8 @@ private:
     std::string mDataPubTopic; /* device data pub topic */
     std::string mEncryptionKey; /* enccryption key */
     bool mProvComplete = false; /* provisioning complete flag */
+    int ACTIVATION_PENDING = 4;
+    int ACTIVATION_TIMEOUT = 5;
 
     /**
      * @brief AP mode HTTP server scan event handler
@@ -191,6 +193,9 @@ public:
      * @param eventData event data
      */
     static void MQTTEventHandlerProvision(void * handlerArgs, esp_event_base_t base, int32_t id, void * eventData);
+
+
+    std::string cJsonToActivationCmd(int value);
 };
 
 
