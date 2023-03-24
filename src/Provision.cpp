@@ -15,7 +15,6 @@
 #include "Device.h"
 #include "DeviceConfig.h"
 #include "string"
-#include "Message.h"
 
 static const char * TAG = "Provision";
 
@@ -370,27 +369,24 @@ void Provision::MQTTEventHandlerProvision(void * handlerArgs, esp_event_base_t b
         break;
         case MQTT_EVENT_DATA: /*!< data event, additional context: */
         {
-            std::string data;
-            data = std::string(mqttData->data, mqttData->data_len);
+            std::string data = provision->mDevice->DecryptPayload(std::string(mqttData->data, mqttData->data_len));
             ESP_LOGI(TAG, "Message %s", data.c_str());
-            MessageParse * message = new MessageParse();
-            message->FromString(data);
+            
             /* Send Activation success here */
-            if (message->mCommandType == Command::CommandType::COMMAND_TYPE_ACTIVATION && message->mCommandSubType == Command::CommandSubType::COMMAND_SUBTYPE_ADDITION_CONFIRMATION)
+            if (provision->mDevice->GetCommandType(data) == provision->mDevice->CMD_ACTIVATION && provision->mDevice->GetCommandValue(data) == provision->mDevice->ACTIVATION_SUCCESS)
             {
-                message->SetResponseType(Response::ResponseType::RESPONSE_TYPE_SUCCESS);
                 provision->ProvisionEventGroup::EventGroupSetBits(Provision::EG_PROVISION_ACTIVATION_SUCCESS);
                 provision->ProvisionEventGroup::EventGroupClearBits(Provision::EG_PROVISION_ACTIVATION_FAILED);
                 provision->ProvisionEventGroup::EventGroupClearBits(Provision::EG_PROVISION_ACTIVATION_PENDING);
+                provision->MQTTClient::Send(provision->mDevicePubTopic, provision->mDevice->CreateCmd(provision->mDevice->CMD_CONNECTION,provision->mDevice->CONNECTED), 0, true);
             }
             else
             {
-                message->SetResponseType(Response::ResponseType::RESPONSE_TYPE_FAILED);
                 provision->ProvisionEventGroup::EventGroupClearBits(Provision::EG_PROVISION_ACTIVATION_SUCCESS);
                 provision->ProvisionEventGroup::EventGroupSetBits(Provision::EG_PROVISION_ACTIVATION_FAILED);
                 provision->ProvisionEventGroup::EventGroupClearBits(Provision::EG_PROVISION_ACTIVATION_PENDING);
+                provision->MQTTClient::Send(provision->mDevicePubTopic, provision->mDevice->CreateCmd(provision->mDevice->CMD_ACTIVATION,provision->mDevice->ACTIVATION_FAILED), 0, true);
             }
-            provision->MQTTClient::Send(provision->mDevicePubTopic, message->ToString(), 0, true);
         }
         break;
         case MQTT_EVENT_BEFORE_CONNECT: /*!< The event occurs before connecting */
@@ -476,11 +472,9 @@ esp_err_t Provision::Connect()
     ESP_LOGI(TAG, "Device Pub Topic : %s", mDevicePubTopic.c_str());
     ESP_LOGI(TAG, "Encryption Key : %s", mEncryptionKey.c_str());
 
-    Message::EncryptionEnable(false);
     if (!mEncryptionKey.empty())
     {
         PayloadEncryption::Init();
-        Message::EncryptionEnable(true);
         PayloadEncryption::SetEncryptionKey(mEncryptionKey);
     }
     mDevice->mMQTTURI = mMQTTURI;
@@ -490,9 +484,7 @@ esp_err_t Provision::Connect()
     mDevice->mDataPubTopic = mDataPubTopic;
     mDevice->mDataSubTopic = mDataSubTopic;
 
-    MessageCreate * message = new MessageCreate();
-    message->SetCommandType(Message::CommandType::COMMAND_TYPE_DISCONNECTED);
-    mMQTTLastWillMessage = std::string(message->ToString());
+    mMQTTLastWillMessage = std::string(mDevice->CreateCmd(mDevice->CMD_CONNECTION,mDevice->DISCONNECTED));
     ESP_LOGI(TAG, "Disconnected message : %s", mMQTTLastWillMessage.c_str());
     mDevice->MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(mDevice->MQTTEventHandlerDevice)->Context(mDevice)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->TaskPriority(3)->Init()->Register(MQTT_EVENT_ANY, mDevice)->Start();
     return ESP_OK;
@@ -607,21 +599,19 @@ esp_err_t Provision::StartProvisioningWiFi(std::string name)
     
     ESP_LOGI(TAG, "Encryption Key : %s", mEncryptionKey.c_str());
 
-    Message::EncryptionEnable(false);
     if (mEncryptionKey.data())
     {
         PayloadEncryption::Init();
-        Message::EncryptionEnable(true);
         PayloadEncryption::SetEncryptionKey(mEncryptionKey);
     }
 
-    mMQTTLastWillMessage = std::string(cJsonToActivationCmd(ACTIVATION_TIMEOUT));
+    mMQTTLastWillMessage = std::string(mDevice->CreateCmd(mDevice->CMD_ACTIVATION,mDevice->ACTIVATION_TIMEOUT));
     MQTTClient::Uri(mMQTTURI)->ClientID(mMQTTClient)->Handler(MQTTEventHandlerProvision)->Context(this)->LastWillMessage(mMQTTLastWillMessage)->LastWillTopic(mDevicePubTopic)->LastWillRetain(true)->LastWillQOS(2)->Keepalive(5)->TaskPriority(3)->Init()->Register(MQTT_EVENT_ANY, this)->Start();
 
     ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_PENDING, false, false, portMAX_DELAY);
     
 
-    MQTTClient::Send(mDevicePubTopic, cJsonToActivationCmd(ACTIVATION_PENDING), 0, true);
+    MQTTClient::Send(mDevicePubTopic, mDevice->CreateCmd(mDevice->CMD_ACTIVATION,mDevice->ACTIVATION_PENDING), 0, true);
     ESP_LOGI(TAG, "ACTIVATION PENDING SENT");
     ProvisionEventGroup::EventGroupWaitBits(ProvisionEventGroup::EG_PROVISION_ACTIVATION_SUCCESS | ProvisionEventGroup::EG_PROVISION_ACTIVATION_FAILED, false, false, pdMS_TO_TICKS(50000));
 
@@ -640,13 +630,13 @@ esp_err_t Provision::StartProvisioningWiFi(std::string name)
     else if (ProvisionEventGroup::IsEventGroupBitSet(ProvisionEventGroup::EG_PROVISION_ACTIVATION_FAILED))
     {
         ESP_LOGI(TAG, "ACTIVATION FAILED");
-        MQTTClient::Send(mDevicePubTopic, cJsonToActivationCmd(ACTIVATION_TIMEOUT), 1, true);
+        MQTTClient::Send(mDevicePubTopic, mDevice->CreateCmd(mDevice->CMD_ACTIVATION,mDevice->ACTIVATION_TIMEOUT), 1, true);
         mProvComplete = false;
     }
     else
     {
         ESP_LOGE(TAG, "ACTIVATION FAILED DUE TO TIMEOUT");
-        MQTTClient::Send(mDevicePubTopic, cJsonToActivationCmd(ACTIVATION_TIMEOUT), 1, true);
+        MQTTClient::Send(mDevicePubTopic, mDevice->CreateCmd(mDevice->CMD_ACTIVATION,mDevice->ACTIVATION_TIMEOUT), 1, true);
         mProvComplete = false;
     }
 
@@ -877,45 +867,4 @@ esp_err_t Provision::FetchDataFromInitResponse(std::string response)
 end:
     cJSON_Delete(Obj);
     return ESP_OK;
-}
-
-
-std::string Provision::cJsonToActivationCmd(int value)
-{
-    cJSON *mObj, *eObj;
-
-    std::string stringified = "";
-    std::string encryptedData = "";
-    std::string iv = "";
-
-    char *str;
-
-    mObj = cJSON_CreateObject();
-    if (mObj == NULL)
-    {
-        ESP_LOGE(TAG, "Error Creating Object mObj");
-        goto end;
-    }
-
-    cJSON_AddStringToObject(mObj, "c", "a");
-    cJSON_AddNumberToObject(mObj, "v", value);
-
-    str = cJSON_PrintUnformatted(mObj);
-    stringified = std::string(str);
-    free(str);
-
-    PayloadEncryption::EncryptCBC(&encryptedData, &iv, stringified);
-
-    eObj = cJSON_CreateObject();
-    cJSON_AddStringToObject(eObj, "iv", iv.c_str());
-    cJSON_AddStringToObject(eObj, "eData", encryptedData.c_str());
-
-    str = cJSON_PrintUnformatted(eObj);
-    stringified = std::string(str);
-    free(str);
-
-    cJSON_Delete(eObj);
-end:
-    cJSON_Delete(mObj);
-    return stringified;
 }

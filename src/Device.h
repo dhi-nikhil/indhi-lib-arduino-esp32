@@ -139,18 +139,43 @@ public:
 
     esp_err_t SaveConfig(char * var, double data);
 
-    std::string cJsonToSendStr(std::string key, char * data); 
-    std::string cJsonToSendDouble(std::string key, double data);
-    std::string cJsonToSendAck(std::string responseType, std::string data);
     std::string DecryptPayload(std::string data);
     std::string GetSlot(std::string data);
     std::string GetValueStr(std::string data);
     double GetValueDouble(std::string data);
-    std::string GetMessageId(std::string data);
     Message::DataType GetDataType(std::string data);
-    Message::Command::CommandType GetCommandType(std::string data);
     std::string GetURL(std::string data);
     std::string ConfigGetVar(std::string data);
+
+    enum DataType
+    {
+        DATA_TYPE_NONE = 0, /* Data type none */
+        DATA_TYPE_INTEGER, /* Data type integer */
+        DATA_TYPE_STRING, /* Data type string */
+        DATA_TYPE_INVALID, /* invalid */
+        DATA_TYPE_MAX,
+    };
+
+    std::string CMD_ACTIVATION = "a";
+    int ACTIVATION_PENDING = 4;
+    int ACTIVATION_TIMEOUT = 5;
+    int ACTIVATION_FAILED = 6;
+    int ACTIVATION_SUCCESS = 7;
+
+    std::string CMD_CONNECTION = "c";
+    int CONNECTED = 1;
+    int DISCONNECTED = 0;
+
+    std::string CMD_SEND = "w";
+    std::string CMD_DECONFIGURE = "d";
+    std::string CMD_UPDATE = "u";
+    std::string CMD_SETTINGS = "s";
+
+    std::string CreateCmd(std::string cmd, int value);
+    std::string CreateCmdWithExtra(std::string cmd, double value, std::string strValue, std::string slot, std::string var);
+    std::string GetCommandType(std::string data);
+    int GetCommandValue(std::string data);
+
     /**
      * @brief Reset button task
      *

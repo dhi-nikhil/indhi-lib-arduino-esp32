@@ -38,30 +38,24 @@ void Device::DeviceEventHandler(void *handlerArguments, esp_event_base_t base, i
             ESP_LOGI(TAG, "topic : %s", Topic.c_str());
 
             std::string decryptedData = device->DecryptPayload(Data);
+            std::string cmd = device->GetCommandType(decryptedData);
 
             /* Check if the data is Device data */
             if (Topic == device->mDeviceSubTopic)
             {
-                switch (device->GetCommandType(decryptedData))
-                {
-                case Command::CommandType::COMMAND_TYPE_DECONFIGURE:
-                {
+                if(cmd == device->CMD_DECONFIGURE){
                     ESP_LOGI(TAG, "Deconfigure message");
                     device->EraseData();
-                    std::string resTypeString = "success";
-                    std::string dataData = device->cJsonToSendAck(resTypeString, decryptedData);
-                    device->MQTTClient::Send(device->mDevicePubTopic, dataData, 0, false);
-                }
-                break;
-                case Command::CommandType::COMMAND_TYPE_UPDATE:
-                {
+                    
+                    device->MQTTClient::Send(device->mDevicePubTopic, device->CreateCmd(device->CMD_DECONFIGURE,NULL), 0, false);
+                
+                }else if(cmd == device->CMD_UPDATE){
+
                     ESP_LOGI(TAG, "Update firmware");
                     std::string server_certificate = "";
-                    HttpsOTA.begin((char *)device->GetURL(decryptedData).c_str(), server_certificate.c_str(), false); 
-                }
-                break;
-                case Command::CommandType::COMMAND_TYPE_CONFIG:
-                {
+                    HttpsOTA.begin((char *)device->GetURL(decryptedData).c_str(), server_certificate.c_str(), false);
+
+                }else if(cmd == device->CMD_SETTINGS){
                     esp_err_t err;
 
                     std::string var = device->ConfigGetVar(decryptedData);
@@ -70,70 +64,36 @@ void Device::DeviceEventHandler(void *handlerArguments, esp_event_base_t base, i
                     device->mConfigCallback((char *)var.c_str(),value);
 
                     err = device->SaveConfig((char *)var.c_str(), value);
-                    
-                    std::string resTypeString = "";
 
                     if (err == ESP_OK)
                     {
-                        resTypeString = "success";
+                        device->MQTTClient::Send(device->mDevicePubTopic, device->CreateCmdWithExtra(device->CMD_SETTINGS,value,"","",var), 0, false);
                     }
-                    else
-                    {
-                        resTypeString = "failed";
-                    }
-
-                    std::string dataData = device->cJsonToSendAck(resTypeString, decryptedData);
-
-                    device->MQTTClient::Send(device->mDevicePubTopic, dataData, 0, false);
-                }
-                break;
-                default:
-                {
+                }else{
                     ESP_LOGE(TAG, "Invalid message for Device");
-                }
-                break;
                 }
             }
             else
             {
-                switch (device->GetCommandType(decryptedData))
-                {
-                case Command::CommandType::COMMAND_TYPE_CONTROL:
-                {
-                    esp_err_t err = ESP_OK;
+                if(cmd == device->CMD_SEND){
+                    std::string slot = device->GetSlot(decryptedData);
+
                     if (device->GetDataType(decryptedData) == Data::DATA_TYPE_INTEGER)
                     {
-                        device->mDataCallback((char *)device->GetSlot(decryptedData).c_str(), device->GetValueDouble(decryptedData), NULL);
+                        device->mDataCallback((char *)slot.c_str(), device->GetValueDouble(decryptedData), NULL);
+                        device->MQTTClient::Send(device->mDataPubTopic, device->CreateCmdWithExtra(device->CMD_SEND,device->GetValueDouble(decryptedData),"",slot,""), 0, false);
+
                     }
                     else if (device->GetDataType(decryptedData) == Data::DATA_TYPE_STRING)
                     {
-                        device->mDataCallback((char *)device->GetSlot(decryptedData).c_str(), NULL, (char *)device->GetValueStr(decryptedData).c_str());
+                        device->mDataCallback((char *)slot.c_str(), NULL, (char *)device->GetValueStr(decryptedData).c_str());
+                        device->MQTTClient::Send(device->mDataPubTopic, device->CreateCmdWithExtra(device->CMD_SEND,0,device->GetValueStr(decryptedData),slot,""), 0, false);
+
                     }
                     else
                     {
                         ESP_LOGE(TAG, "Unknown dataType");
                     }
-
-                    std::string resTypeString = "";
-
-                    if (err == ESP_OK)
-                    {
-                        resTypeString = "success";
-                    }
-                    else
-                    {
-                        resTypeString = "failed";
-                    }
-
-                    std::string dataData = device->cJsonToSendAck(resTypeString, decryptedData);
-
-                    device->MQTTClient::Send(device->mDataPubTopic, dataData, 0, false);
-                }
-                break;
-                default:
-                {
-                }
-                break;
                 }
             }
         }
@@ -206,10 +166,7 @@ void Device::MQTTEventHandlerDevice(void *handlerArgs, esp_event_base_t base, in
     {
         device->MQTTClient::Subscribe(device->mDeviceSubTopic);
         device->MQTTClient::Subscribe(device->mDataSubTopic);
-
-        MessageCreate *message = new MessageCreate();
-        message->SetCommandType(Message::CommandType::COMMAND_TYPE_CONNECTED);
-        device->MQTTClient::Send(device->mDevicePubTopic, message->ToString(), 0, true);
+        device->MQTTClient::Send(device->mDevicePubTopic, device->CreateCmd(device->CMD_CONNECTION,device->CONNECTED), 0, true);
     }
     break;
     case MQTT_EVENT_DISCONNECTED: /*!< disconnected event */
@@ -301,7 +258,7 @@ esp_err_t Device::Send(char *slot, double data, int decimalPlaces)
     data = std::ceil(data * multiplier) / multiplier;
 
     std::string slotStr(slot);
-    std::string messageString = cJsonToSendDouble(slotStr, data);
+    std::string messageString = CreateCmdWithExtra(CMD_SEND,data,"",slotStr,"");
     MQTTData mqttData;
     mqttData.data_len = messageString.length();
     strncpy(&mqttData.data[0], messageString.c_str(), messageString.length());
@@ -312,158 +269,11 @@ esp_err_t Device::Send(char *slot, char *data)
 {
 
     std::string slotStr(slot);
-    std::string messageString = cJsonToSendStr(slotStr, data);
+    std::string messageString = CreateCmdWithExtra(CMD_SEND,0,data,slotStr,"");
     MQTTData mqttData;
     mqttData.data_len = messageString.length();
     strncpy(&mqttData.data[0], messageString.c_str(), messageString.length());
     return Post(mTemplateId.c_str(), Device::DEVICE_SLOT_EVENT_DATA_SEND, &mqttData, sizeof(mqttData));
-}
-
-std::string Device::cJsonToSendStr(std::string key, char *data)
-{
-    cJSON *mObj, *eObj;
-
-    std::string stringified = "";
-    std::string commandTypeString = "status";
-    std::string encryptedData = "";
-    std::string iv = "";
-
-    char *str;
-
-    mObj = cJSON_CreateObject();
-    if (mObj == NULL)
-    {
-        ESP_LOGE(TAG, "Error Creating Object mObj");
-        goto end;
-    }
-
-    if (!commandTypeString.empty())
-    {
-        cJSON_AddStringToObject(mObj, "command_type", commandTypeString.c_str());
-        cJSON_AddStringToObject(mObj, "slot", key.c_str());
-        cJSON_AddStringToObject(mObj, "value", data);
-    }
-
-    str = cJSON_PrintUnformatted(mObj);
-    stringified = std::string(str);
-    free(str);
-
-    PayloadEncryption::EncryptCBC(&encryptedData, &iv, stringified);
-
-    eObj = cJSON_CreateObject();
-    cJSON_AddStringToObject(eObj, "iv", iv.c_str());
-    cJSON_AddStringToObject(eObj, "eData", encryptedData.c_str());
-
-    str = cJSON_PrintUnformatted(eObj);
-    stringified = std::string(str);
-    free(str);
-
-    cJSON_Delete(eObj);
-end:
-    cJSON_Delete(mObj);
-    return stringified;
-}
-
-std::string Device::cJsonToSendDouble(std::string key, double data)
-{
-    cJSON *mObj, *eObj;
-
-    std::string stringified = "";
-    std::string commandTypeString = "status";
-    std::string encryptedData = "";
-    std::string iv = "";
-
-    char *str;
-
-    mObj = cJSON_CreateObject();
-    if (mObj == NULL)
-    {
-        ESP_LOGE(TAG, "Error Creating Object mObj");
-        goto end;
-    }
-
-    if (!commandTypeString.empty())
-    {
-        cJSON_AddStringToObject(mObj, "command_type", commandTypeString.c_str());
-        cJSON_AddStringToObject(mObj, "slot", key.c_str());
-        cJSON_AddNumberToObject(mObj, "value", data);
-    }
-
-    str = cJSON_PrintUnformatted(mObj);
-    stringified = std::string(str);
-    free(str);
-
-    PayloadEncryption::EncryptCBC(&encryptedData, &iv, stringified);
-
-    eObj = cJSON_CreateObject();
-    cJSON_AddStringToObject(eObj, "iv", iv.c_str());
-    cJSON_AddStringToObject(eObj, "eData", encryptedData.c_str());
-
-    str = cJSON_PrintUnformatted(eObj);
-    stringified = std::string(str);
-    free(str);
-
-    cJSON_Delete(eObj);
-end:
-    cJSON_Delete(mObj);
-    return stringified;
-}
-
-std::string Device::cJsonToSendAck(std::string responseType, std::string data)
-{
-    cJSON *mObj, *eObj;
-
-    std::string stringified = "";
-    std::string encryptedData = "";
-    std::string iv = "";
-
-    char *str;
-
-    mObj = cJSON_CreateObject();
-    if (mObj == NULL)
-    {
-        ESP_LOGE(TAG, "Error Creating Object mObj");
-        goto end;
-    }
-
-    cJSON_AddStringToObject(mObj, "command_type", "acknowledgement");
-    cJSON_AddStringToObject(mObj, "response_status", responseType.c_str());
-    cJSON_AddStringToObject(mObj, "message_id", GetMessageId(data).c_str());
-
-    if (GetCommandType(data) != Command::CommandType::COMMAND_TYPE_DECONFIGURE && GetCommandType(data) != Command::CommandType::COMMAND_TYPE_ACTIVATION)
-        {
-            cJSON_AddStringToObject(mObj, "slot", GetSlot(data).c_str());
-            if (GetDataType(data) == Data::DATA_TYPE_INTEGER)
-            {
-                cJSON_AddNumberToObject(mObj, "value", GetValueDouble(data));
-            }
-            else if (GetDataType(data) == Data::DATA_TYPE_STRING)
-            {
-                cJSON_AddStringToObject(mObj, "value", GetValueStr(data).c_str());
-            }
-            else
-            {
-            }
-        }
-
-    str = cJSON_PrintUnformatted(mObj);
-    stringified = std::string(str);
-    free(str);
-
-    PayloadEncryption::EncryptCBC(&encryptedData, &iv, stringified);
-
-    eObj = cJSON_CreateObject();
-    cJSON_AddStringToObject(eObj, "iv", iv.c_str());
-    cJSON_AddStringToObject(eObj, "eData", encryptedData.c_str());
-
-    str = cJSON_PrintUnformatted(eObj);
-    stringified = std::string(str);
-    free(str);
-
-    cJSON_Delete(eObj);
-end:
-    cJSON_Delete(mObj);
-    return stringified;
 }
 
 std::string Device::DecryptPayload(std::string data)
@@ -497,7 +307,7 @@ end:
     return decryptedData;
 }
 
-Message::DataType Device::GetDataType(std::string data)
+Device::DataType Device::GetDataType(std::string data)
 {
     cJSON *eObj, *_data;
 
@@ -509,89 +319,29 @@ Message::DataType Device::GetDataType(std::string data)
         goto end;
     }
 
-    _data = cJSON_GetObjectItemCaseSensitive(eObj, "value");
+    _data = cJSON_GetObjectItemCaseSensitive(eObj, "v");
 
     if (_data)
     {
         if (cJSON_IsNumber(_data))
         {
-            return Message::DataType::DATA_TYPE_INTEGER;
+            return Device::DataType::DATA_TYPE_INTEGER;
         }
         else if (cJSON_IsString(_data))
         {
-            return Message::DataType::DATA_TYPE_STRING;
+            return Device::DataType::DATA_TYPE_STRING;
         }
         else
         {
-            return Message::DataType::DATA_TYPE_INVALID;
+            return Device::DataType::DATA_TYPE_INVALID;
         }
     }
     else
     {
-        return Message::DataType::DATA_TYPE_NONE;
+        return Device::DataType::DATA_TYPE_NONE;
     }
 end:
     cJSON_Delete(eObj);
-}
-
-Message::Command::CommandType Device::GetCommandType(std::string data)
-{
-    cJSON *eObj, *commandType;
-    std::string commandTypeString;
-
-    Command::CommandType mCommandType;
-
-    eObj = cJSON_Parse(data.c_str());
-
-    if (eObj == NULL)
-    {
-        ESP_LOGE(TAG, "Error Parsing data");
-        goto end;
-    }
-
-    commandType = cJSON_GetObjectItemCaseSensitive(eObj, "command_type");
-    if (commandType)
-    {
-        commandTypeString = std::string(cJSON_GetStringValue(commandType));
-    }
-
-    if (commandTypeString == "activation")
-    {
-        mCommandType = Command::CommandType::COMMAND_TYPE_ACTIVATION;
-    }
-    else if (commandTypeString == "update")
-    {
-        mCommandType = Command::CommandType::COMMAND_TYPE_UPDATE;
-    }
-    else if (commandTypeString == "control")
-    {
-        mCommandType = Command::CommandType::COMMAND_TYPE_CONTROL;
-    }
-    else if (commandTypeString == "status")
-    {
-        mCommandType = Command::CommandType::COMMAND_TYPE_STATUS;
-    }
-    else if (commandTypeString == "deconfigure")
-    {
-        mCommandType = Command::CommandType::COMMAND_TYPE_DECONFIGURE;
-    }
-    else if (commandTypeString == "delete") //  not used
-    {
-        mCommandType = Command::CommandType::COMMAND_TYPE_DELETE;
-    }
-    else if (commandTypeString == "disconnected")
-    {
-        mCommandType = Command::CommandType::COMMAND_TYPE_DISCONNECTED;
-    }
-    else
-    {
-        mCommandType = Command::CommandType::COMMAND_TYPE_INVALID;
-        ESP_LOGE(TAG, "Invalid commandTypeString");
-    }
-
-end:
-    cJSON_Delete(eObj);
-    return mCommandType;
 }
 
 std::string Device::GetSlot(std::string data)
@@ -607,7 +357,7 @@ std::string Device::GetSlot(std::string data)
         goto end;
     }
 
-    _slot = cJSON_GetObjectItemCaseSensitive(eObj, "slot");
+    _slot = cJSON_GetObjectItemCaseSensitive(eObj, "s");
 
     if (_slot)
     {
@@ -632,7 +382,7 @@ std::string Device::GetValueStr(std::string data)
         goto end;
     }
 
-    _value = cJSON_GetObjectItemCaseSensitive(eObj, "value");
+    _value = cJSON_GetObjectItemCaseSensitive(eObj, "v");
 
     if (_value)
     {
@@ -656,7 +406,7 @@ double Device::GetValueDouble(std::string data){
         goto end;
     }
 
-    _value = cJSON_GetObjectItemCaseSensitive(eObj, "value");
+    _value = cJSON_GetObjectItemCaseSensitive(eObj, "v");
 
     if (_value)
     {
@@ -666,31 +416,6 @@ double Device::GetValueDouble(std::string data){
 end:
     cJSON_Delete(eObj);
     return mValue;
-}
-
-std::string Device::GetMessageId(std::string data)
-{
-    cJSON *eObj, *messageId;
-    std::string mMessageId;
-
-    eObj = cJSON_Parse(data.c_str());
-
-    if (eObj == NULL)
-    {
-        ESP_LOGE(TAG, "Error Parsing data");
-        goto end;
-    }
-
-    messageId = cJSON_GetObjectItemCaseSensitive(eObj, "message_id");
-
-    if (messageId)
-    {
-        mMessageId = std::string(cJSON_GetStringValue(messageId));
-    }
-
-end:
-    cJSON_Delete(eObj);
-    return mMessageId;
 }
 
 std::string Device::GetURL(std::string data)
@@ -706,7 +431,7 @@ std::string Device::GetURL(std::string data)
         goto end;
     }
 
-    _url = cJSON_GetObjectItemCaseSensitive(eObj, "url");
+    _url = cJSON_GetObjectItemCaseSensitive(eObj, "v");
 
     if (_url)
     {
@@ -773,4 +498,150 @@ Device *Device::AddConfig(DeviceConfig * config){
 
     mConfigs.push_back(config);
     return this;
+}
+
+
+
+
+
+
+
+std::string Device::CreateCmdWithExtra(std::string cmd, double value, std::string strValue, std::string slot, std::string var)
+{
+    cJSON *mObj, *eObj;
+
+    std::string stringified = "";
+    std::string encryptedData = "";
+    std::string iv = "";
+
+    char *str;
+
+    mObj = cJSON_CreateObject();
+    if (mObj == NULL)
+    {
+        ESP_LOGE(TAG, "Error Creating Object mObj");
+        goto end;
+    }
+
+    cJSON_AddStringToObject(mObj, "c", cmd.c_str());
+    
+    if(strValue.empty()){
+        cJSON_AddNumberToObject(mObj, "v", value);
+    }else{
+        cJSON_AddStringToObject(mObj, "v", strValue.c_str());
+    }
+    if(!slot.empty()){
+        cJSON_AddStringToObject(mObj, "s", slot.c_str());
+    }
+    if(!var.empty()){
+        cJSON_AddStringToObject(mObj, "var", var.c_str());
+    }
+
+    str = cJSON_PrintUnformatted(mObj);
+    stringified = std::string(str);
+    free(str);
+
+    PayloadEncryption::EncryptCBC(&encryptedData, &iv, stringified);
+
+    eObj = cJSON_CreateObject();
+    cJSON_AddStringToObject(eObj, "iv", iv.c_str());
+    cJSON_AddStringToObject(eObj, "eData", encryptedData.c_str());
+
+    str = cJSON_PrintUnformatted(eObj);
+    stringified = std::string(str);
+    free(str);
+
+    cJSON_Delete(eObj);
+end:
+    cJSON_Delete(mObj);
+    return stringified;
+}
+
+std::string Device::CreateCmd(std::string cmd, int value)
+{
+    cJSON *mObj, *eObj;
+
+    std::string stringified = "";
+    std::string encryptedData = "";
+    std::string iv = "";
+
+    char *str;
+
+    mObj = cJSON_CreateObject();
+    if (mObj == NULL)
+    {
+        ESP_LOGE(TAG, "Error Creating Object mObj");
+        goto end;
+    }
+
+    cJSON_AddStringToObject(mObj, "c", cmd.c_str());
+    cJSON_AddNumberToObject(mObj, "v", value);
+
+    str = cJSON_PrintUnformatted(mObj);
+    stringified = std::string(str);
+    free(str);
+
+    PayloadEncryption::EncryptCBC(&encryptedData, &iv, stringified);
+
+    eObj = cJSON_CreateObject();
+    cJSON_AddStringToObject(eObj, "iv", iv.c_str());
+    cJSON_AddStringToObject(eObj, "eData", encryptedData.c_str());
+
+    str = cJSON_PrintUnformatted(eObj);
+    stringified = std::string(str);
+    free(str);
+
+    cJSON_Delete(eObj);
+end:
+    cJSON_Delete(mObj);
+    return stringified;
+}
+
+
+std::string Device::GetCommandType(std::string data)
+{
+    cJSON *eObj, *commandType;
+    std::string commandTypeString;
+
+    eObj = cJSON_Parse(data.c_str());
+
+    if (eObj == NULL)
+    {
+        ESP_LOGE(TAG, "Error Parsing data");
+        goto end;
+    }
+
+    commandType = cJSON_GetObjectItemCaseSensitive(eObj, "c");
+    if (commandType)
+    {
+        commandTypeString = std::string(cJSON_GetStringValue(commandType));
+    }
+
+end:
+    cJSON_Delete(eObj);
+    return commandTypeString;
+}
+
+int Device::GetCommandValue(std::string data)
+{
+    cJSON *eObj, *value;
+    int mValue;
+
+    eObj = cJSON_Parse(data.c_str());
+
+    if (eObj == NULL)
+    {
+        ESP_LOGE(TAG, "Error Parsing data");
+        goto end;
+    }
+
+    value = cJSON_GetObjectItemCaseSensitive(eObj, "v");
+    if (value)
+    {
+        mValue = cJSON_GetNumberValue(value);
+    }
+
+end:
+    cJSON_Delete(eObj);
+    return mValue;
 }
