@@ -1,4 +1,5 @@
-#define LOG_LOCAL_LEVEL ESP_LOG_NONE
+// #define LOG_LOCAL_LEVEL ESP_LOG_NONE
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -6,7 +7,6 @@
 #include "sdkconfig.h"
 #include "Device.h"
 #include "WiFi.h"
-#include "Message.h"
 #include "System.h"
 #include "driver/gpio.h"
 #include <cmath>
@@ -75,16 +75,16 @@ void Device::DeviceEventHandler(void *handlerArguments, esp_event_base_t base, i
             }
             else
             {
-                if(cmd == device->CMD_SEND){
+                if(cmd == device->CMD_WRITE){
                     std::string slot = device->GetSlot(decryptedData);
 
-                    if (device->GetDataType(decryptedData) == Data::DATA_TYPE_INTEGER)
+                    if (device->GetDataType(decryptedData) == DataType::DATA_TYPE_INTEGER)
                     {
                         device->mDataCallback((char *)slot.c_str(), device->GetValueDouble(decryptedData), NULL);
                         device->MQTTClient::Send(device->mDataPubTopic, device->CreateCmdWithExtra(device->CMD_SEND,device->GetValueDouble(decryptedData),"",slot,""), 0, false);
 
                     }
-                    else if (device->GetDataType(decryptedData) == Data::DATA_TYPE_STRING)
+                    else if (device->GetDataType(decryptedData) == DataType::DATA_TYPE_STRING)
                     {
                         device->mDataCallback((char *)slot.c_str(), NULL, (char *)device->GetValueStr(decryptedData).c_str());
                         device->MQTTClient::Send(device->mDataPubTopic, device->CreateCmdWithExtra(device->CMD_SEND,0,device->GetValueStr(decryptedData),slot,""), 0, false);

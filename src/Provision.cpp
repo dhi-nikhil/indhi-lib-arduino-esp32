@@ -11,7 +11,6 @@
 #include "ProvisionEventLoop.h"
 #include "cJSON.h"
 #include "System.h"
-#include "Utils.h"
 #include "Device.h"
 #include "DeviceConfig.h"
 #include "string"

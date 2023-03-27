@@ -9,7 +9,6 @@
 #include "MQTTClient.h"
 #include "DefaultEventLoop.h"
 #include "Task.h"
-#include "Message.h"
 #include "DeviceConfig.h"
 
 /* This should be singleton */
@@ -139,14 +138,6 @@ public:
 
     esp_err_t SaveConfig(char * var, double data);
 
-    std::string DecryptPayload(std::string data);
-    std::string GetSlot(std::string data);
-    std::string GetValueStr(std::string data);
-    double GetValueDouble(std::string data);
-    Message::DataType GetDataType(std::string data);
-    std::string GetURL(std::string data);
-    std::string ConfigGetVar(std::string data);
-
     enum DataType
     {
         DATA_TYPE_NONE = 0, /* Data type none */
@@ -155,6 +146,14 @@ public:
         DATA_TYPE_INVALID, /* invalid */
         DATA_TYPE_MAX,
     };
+
+    std::string DecryptPayload(std::string data);
+    std::string GetSlot(std::string data);
+    std::string GetValueStr(std::string data);
+    double GetValueDouble(std::string data);
+    DataType GetDataType(std::string data);
+    std::string GetURL(std::string data);
+    std::string ConfigGetVar(std::string data);
 
     std::string CMD_ACTIVATION = "a";
     int ACTIVATION_PENDING = 4;
@@ -166,10 +165,11 @@ public:
     int CONNECTED = 1;
     int DISCONNECTED = 0;
 
-    std::string CMD_SEND = "w";
+    std::string CMD_SEND = "v";
     std::string CMD_DECONFIGURE = "d";
     std::string CMD_UPDATE = "u";
     std::string CMD_SETTINGS = "s";
+    std::string CMD_WRITE= "w";
 
     std::string CreateCmd(std::string cmd, int value);
     std::string CreateCmdWithExtra(std::string cmd, double value, std::string strValue, std::string slot, std::string var);
