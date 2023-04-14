@@ -169,6 +169,7 @@ public:
     std::string CMD_DECONFIGURE = "d";
     std::string CMD_UPDATE = "u";
     std::string CMD_SETTINGS = "s";
+    std::string CMD_SETTINGS_VALUE = "sv";
     std::string CMD_WRITE= "w";
 
     std::string CreateCmd(std::string cmd, int value);

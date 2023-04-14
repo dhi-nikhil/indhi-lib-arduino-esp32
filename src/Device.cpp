@@ -1,4 +1,3 @@
-// #define LOG_LOCAL_LEVEL ESP_LOG_NONE
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 
 #include "freertos/FreeRTOS.h"
@@ -67,7 +66,7 @@ void Device::DeviceEventHandler(void *handlerArguments, esp_event_base_t base, i
 
                     if (err == ESP_OK)
                     {
-                        device->MQTTClient::Send(device->mDevicePubTopic, device->CreateCmdWithExtra(device->CMD_SETTINGS,value,"","",var), 0, false);
+                        device->MQTTClient::Send(device->mDevicePubTopic, device->CreateCmdWithExtra(device->CMD_SETTINGS_VALUE,value,"","",var), 0, false);
                     }
                 }else{
                     ESP_LOGE(TAG, "Invalid message for Device");
@@ -456,7 +455,7 @@ std::string Device::ConfigGetVar(std::string data)
         goto end;
     }
 
-    _var = cJSON_GetObjectItemCaseSensitive(eObj, "namespace");
+    _var = cJSON_GetObjectItemCaseSensitive(eObj, "var");
 
     if (_var)
     {
@@ -484,9 +483,9 @@ esp_err_t Device::SaveConfig(char * var, double value){
     esp_err_t err = NVStorage::putDouble(var, value);
 
     if(err != ESP_OK){
-        ESP_LOGE(TAG, "add config data fail: %s -- %f", var,value);
+        ESP_LOGE(TAG, "save config data fail: %s -- %f", var,value);
     }else{
-        ESP_LOGE(TAG, "add config data : %s -- %f", var,value);
+        ESP_LOGE(TAG, "save config data : %s -- %f", var,value);
     }
 
     return err;
@@ -500,14 +499,9 @@ Device *Device::AddConfig(DeviceConfig * config){
     return this;
 }
 
-
-
-
-
-
-
 std::string Device::CreateCmdWithExtra(std::string cmd, double value, std::string strValue, std::string slot, std::string var)
 {
+
     cJSON *mObj, *eObj;
 
     std::string stringified = "";
@@ -527,18 +521,24 @@ std::string Device::CreateCmdWithExtra(std::string cmd, double value, std::strin
     
     if(strValue.empty()){
         cJSON_AddNumberToObject(mObj, "v", value);
+    ESP_LOGI(TAG, "value added");
     }else{
         cJSON_AddStringToObject(mObj, "v", strValue.c_str());
+    ESP_LOGI(TAG, "string value added");
     }
     if(!slot.empty()){
         cJSON_AddStringToObject(mObj, "s", slot.c_str());
+    ESP_LOGI(TAG, "slot added");
     }
     if(!var.empty()){
         cJSON_AddStringToObject(mObj, "var", var.c_str());
+    ESP_LOGI(TAG, "var added");
     }
 
+    ESP_LOGI(TAG, "cmd : %s", cmd.c_str());
     str = cJSON_PrintUnformatted(mObj);
     stringified = std::string(str);
+    ESP_LOGI(TAG, "json : %s", stringified.c_str());
     free(str);
 
     PayloadEncryption::EncryptCBC(&encryptedData, &iv, stringified);
